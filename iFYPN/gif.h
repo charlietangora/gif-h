@@ -49,6 +49,30 @@ void AssignColors( Palette* pPal, U32* rPal, U32* gPal, U32* bPal )
     }
 }
 
+void FillInitialPalette( U8* image, U32 width, U32 height, Palette* pPal )
+{
+    pPal->clear();
+    
+    U32 numPixels = width*height;
+    for( U32F ii=0; ii<numPixels; ++ii )
+    {
+        U8 r = image[ii*4];
+        U8 g = image[ii*4+1];
+        U8 b = image[ii*4+2];
+        
+        U32 rgb = (r << 16) | (g << 8) | b;
+        
+        if(pPal->find(rgb) != pPal->end())
+        {
+            (*pPal)[rgb].first++;
+        }
+        else
+        {
+            (*pPal)[rgb] = std::pair<U32,U32>(0,0);
+        }
+    }
+}
+
 void KMeansIterate( U8* image, U32 width, U32 height, Palette* pPal )
 {
     U32 rAvg[256];
@@ -145,24 +169,7 @@ void KMeansIterate( U8* image, U32 width, U32 height, Palette* pPal )
 
 void MakePalette( U8* image, U32 width, U32 height, Palette* pPal )
 {
-    U32 numPixels = width*height;
-    for( U32F ii=0; ii<numPixels; ++ii )
-    {
-        U8 r = image[ii*4];
-        U8 g = image[ii*4+1];
-        U8 b = image[ii*4+2];
-        
-        U32 rgb = (r << 16) | (g << 8) | b;
-        
-        if(pPal->find(rgb) != pPal->end())
-        {
-            (*pPal)[rgb].first++;
-        }
-        else
-        {
-            (*pPal)[rgb] = std::pair<U32,U32>(0,0);
-        }
-    }
+    FillInitialPalette(image, width, height, pPal);
     
     U32 rBas[256];
     U32 gBas[256];
@@ -198,6 +205,43 @@ void MakePalette( U8* image, U32 width, U32 height, Palette* pPal )
     {
         KMeansIterate(image, width, height, pPal);
     }
+}
+
+void TransferPalette( Palette* pPal, U8* image, U32 width, U32 height )
+{
+    U32 rOld[256];
+    U32 gOld[256];
+    U32 bOld[256];
+    
+    rOld[0] = 0;
+    gOld[0] = 0;
+    bOld[0] = 0;
+    
+    rOld[1] = 0;
+    gOld[1] = 0;
+    bOld[1] = 0;
+    
+    rOld[255] = 255;
+    gOld[255] = 255;
+    bOld[255] = 255;
+    
+    for (Palette::const_iterator it = pPal->begin(); it != pPal->end(); ++it)
+    {
+        U32 prgb = it->second.second;
+        U32 p = (prgb >> 24) & 0xff;
+        U32 r = (prgb >> 16) & 0xff;
+        U32 g = (prgb >> 8) & 0xff;
+        U32 b = (prgb) & 0xff;
+        
+        rOld[p] = r;
+        gOld[p] = g;
+        bOld[p] = b;
+    }
+    
+    FillInitialPalette(image, width, height, pPal);
+    AssignColors(pPal, rOld, gOld, bOld);
+    
+    KMeansIterate(image, width, height, pPal);
 }
 
 struct BitStatus
@@ -346,9 +390,10 @@ void WriteLzwImage(FILE* f, U8* image, U8* oldImage, U32 left, U32 top,  U32 wid
     fputc(height & 0xff, f);
     fputc((height >> 8) & 0xff, f);
     
-    //fputc(0, f); // no local color table
-    fputc(0x87, f); // local color table present, 256 entries
+    //fputc(0, f); // no local color table, no transparency
+    //fputc(0x80, f); // no local color table, but transparency
     
+    fputc(0x87, f); // local color table present, 256 entries
     WritePalette(&pal, f);
     
     fputc(8, f); // min code size 8 bits
@@ -372,7 +417,7 @@ void WriteLzwImage(FILE* f, U8* image, U8* oldImage, U32 left, U32 top,  U32 wid
             U8 r = image[(yy*width+xx)*4];
             U8 g = image[(yy*width+xx)*4+1];
             U8 b = image[(yy*width+xx)*4+2];
-            U8 a = image[(yy*width+xx)*4+4];
+            U8 a = image[(yy*width+xx)*4+3];
             U8 nextValue = Palettize(&r, &g, &b, pal);
             
             if( a == 0 )
@@ -385,6 +430,10 @@ void WriteLzwImage(FILE* f, U8* image, U8* oldImage, U32 left, U32 top,  U32 wid
                 oldImage[(yy*width+xx)*4+1] = g;
                 oldImage[(yy*width+xx)*4+2] = b;
             }
+            
+            // "loser mode" - no compression, every single code is followed immediately by a clear
+            //WriteCode( f, stat, nextValue, codeSize );
+            //WriteCode( f, stat, 256, codeSize );
             
             if( curNode->m_children[nextValue] )
             {
@@ -403,16 +452,17 @@ void WriteLzwImage(FILE* f, U8* image, U8* oldImage, U32 left, U32 top,  U32 wid
                 if( maxCode >= (1 << codeSize) )
                 {
                     codeSize++;
-                    if( codeSize == 12 )
-                    {
-                        WriteCode(f, stat, 256, codeSize); // clear tree
-                        
-                        DeleteLzwTree(codetree);
-                        codetree = InitLzwTree();
-                        curNode = codetree;
-                        codeSize = 9;
-                        maxCode = 257;
-                    }
+                }
+                if( maxCode == 4095 )
+                {
+                    ASSERT(codeSize == 12);
+                    WriteCode(f, stat, 256, codeSize); // clear tree
+                    
+                    DeleteLzwTree(codetree);
+                    codetree = InitLzwTree();
+                    curNode = codetree;
+                    codeSize = 9;
+                    maxCode = 257;
                 }
                 
                 curNode = codetree->m_children[nextValue];
@@ -420,7 +470,9 @@ void WriteLzwImage(FILE* f, U8* image, U8* oldImage, U32 left, U32 top,  U32 wid
         }
     }
     
-    WriteCode(f, stat, 257, codeSize);
+    WriteCode( f, stat, curNode->m_code, codeSize );
+    WriteCode( f, stat, 256, codeSize );
+    WriteCode( f, stat, 257, 9 );
     while( stat.bitIndex ) WriteBit(stat, 0);
     if( stat.chunkIndex ) WriteImageChunk(f, stat);
     DeleteLzwTree(codetree);
@@ -457,6 +509,7 @@ void WriteOverTransparency( U8* img, U32 width, U32 height )
 struct GifWriter
 {
     FILE* f;
+    Palette pal;
     U8* oldImage;
 };
 
@@ -465,8 +518,7 @@ void BeginGif( GifWriter* writer, U8* image, U32 width, U32 height, U32 delay )
     writer->f = fopen("/Users/ctangora/cmt-test.gif", "wb");
     ALWAYS_ASSERT(writer->f);
     
-    Palette pal;
-    MakePalette(image, width, height, &pal);
+    MakePalette(image, width, height, &writer->pal);
     WriteOverTransparency(image, width, height);
     
     writer->oldImage = (U8*)malloc(width*height*4);
@@ -485,7 +537,7 @@ void BeginGif( GifWriter* writer, U8* image, U32 width, U32 height, U32 delay )
     fputc(0, writer->f);     // pixels are square (we need to specify this because it's 1989)
     
     // now the global palette
-    WritePalette(&pal, writer->f);
+    WritePalette(&writer->pal, writer->f);
     
     if( delay != 0 )
     {
@@ -496,22 +548,25 @@ void BeginGif( GifWriter* writer, U8* image, U32 width, U32 height, U32 delay )
         fputs("NETSCAPE2.0", writer->f); // yes, really
         fputc(3, writer->f); // 3 bytes of NETSCAPE2.0 data
         
+        fputc(1, writer->f); // JUST BECAUSE
         fputc(0, writer->f); // loop infinitely (byte 0)
         fputc(0, writer->f); // loop infinitely (byte 1)
         
         fputc(0, writer->f); // block terminator
     }
     
-    WriteLzwImage(writer->f, image, writer->oldImage, 0, 0, width, height, delay, pal);
+    WriteLzwImage(writer->f, image, writer->oldImage, 0, 0, width, height, delay, writer->pal);
 }
 
 void ContinueGif( GifWriter* writer, U8* image, U32 width, U32 height, U32 delay )
 {
-    Palette pal;
-    MakePalette(image, width, height, &pal);
+    //Palette pal;
+    //MakePalette(image, width, height, &pal);
+    //WriteOverTransparency(image, width, height);
+    TransferPalette(&writer->pal, image, width, height);
     SetTransparency(writer->oldImage, image, width, height);
     
-    WriteLzwImage(writer->f, image, writer->oldImage, 0, 0, width, height, delay, pal);
+    WriteLzwImage(writer->f, image, writer->oldImage, 0, 0, width, height, delay, writer->pal);
 }
 
 void EndGif( GifWriter* writer )
