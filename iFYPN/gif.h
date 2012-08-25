@@ -118,17 +118,9 @@ void KMeansIterate( U8* image, U32 width, U32 height, Palette* pPal )
         }
     }
     
-    rAvg[0] = 0;
-    gAvg[0] = 0;
-    bAvg[0] = 0;
-    
-    rAvg[1] = 0;
-    gAvg[1] = 0;
-    bAvg[1] = 0;
-    
-    rAvg[255] = 255;
-    gAvg[255] = 255;
-    bAvg[255] = 255;
+    rAvg[0] = gAvg[0] = bAvg[0] = 0;
+    rAvg[1] = gAvg[1] = bAvg[1] = 0;
+    rAvg[255] = gAvg[255] = bAvg[255] = 255;
     
     std::vector< std::pair<U64, U32> > paletteDists;
     for (Palette::iterator it = pPal->begin(); it != pPal->end(); ++it)
@@ -154,7 +146,6 @@ void KMeansIterate( U8* image, U32 width, U32 height, Palette* pPal )
     {
         if( count[ii] == 0 && paletteDists.size() > 0 )
         {
-            U64 dist = paletteDists.back().first;
             U32 col = paletteDists.back().second;
             paletteDists.pop_back();
             
@@ -175,17 +166,9 @@ void MakePalette( U8* image, U32 width, U32 height, Palette* pPal )
     U32 gBas[256];
     U32 bBas[256];
     
-    rBas[0] = 0;
-    gBas[0] = 0;
-    bBas[0] = 0;
-    
-    rBas[1] = 0;
-    gBas[1] = 0;
-    bBas[1] = 0;
-    
-    rBas[255] = 255;
-    gBas[255] = 255;
-    bBas[255] = 255;
+    rBas[0] = gBas[0] = bBas[0] = 0;
+    rBas[1] = gBas[1] = bBas[1] = 0;
+    rBas[255] = gBas[255] = bBas[255] = 255;
     
     for( U32F ii=2; ii<255; ++ii )
     {
@@ -207,24 +190,8 @@ void MakePalette( U8* image, U32 width, U32 height, Palette* pPal )
     }
 }
 
-void TransferPalette( Palette* pPal, U8* image, U32 width, U32 height )
+void GetLinearPalette( const Palette* pPal, U32* rLst, U32* gLst, U32* bLst )
 {
-    U32 rOld[256];
-    U32 gOld[256];
-    U32 bOld[256];
-    
-    rOld[0] = 0;
-    gOld[0] = 0;
-    bOld[0] = 0;
-    
-    rOld[1] = 0;
-    gOld[1] = 0;
-    bOld[1] = 0;
-    
-    rOld[255] = 255;
-    gOld[255] = 255;
-    bOld[255] = 255;
-    
     for (Palette::const_iterator it = pPal->begin(); it != pPal->end(); ++it)
     {
         U32 prgb = it->second.second;
@@ -233,10 +200,23 @@ void TransferPalette( Palette* pPal, U8* image, U32 width, U32 height )
         U32 g = (prgb >> 8) & 0xff;
         U32 b = (prgb) & 0xff;
         
-        rOld[p] = r;
-        gOld[p] = g;
-        bOld[p] = b;
+        rLst[p] = r;
+        gLst[p] = g;
+        bLst[p] = b;
     }
+    
+    rLst[0] = gLst[0] = bLst[0] = 0;
+    rLst[1] = gLst[1] = bLst[1] = 0;
+    rLst[255] = gLst[255] = bLst[255] = 255;
+}
+
+void TransferPalette( Palette* pPal, U8* image, U32 width, U32 height )
+{
+    U32 rOld[256];
+    U32 gOld[256];
+    U32 bOld[256];
+    
+    GetLinearPalette(pPal, rOld, gOld, bOld);
     
     FillInitialPalette(image, width, height, pPal);
     AssignColors(pPal, rOld, gOld, bOld);
@@ -283,13 +263,6 @@ void WriteImageChunk( FILE* f, BitStatus& stat )
 
 void WriteCode( FILE* f, BitStatus& stat, U32 code, U32 length )
 {
-    //U32 bitsRemaining = (255 - stat.chunkIndex)*8 + 8-stat.bitIndex;
-    
-    //if( bitsRemaining < length )
-    //{
-    //    WriteImageChunk(f, stat);
-    //}
-    
     for( U32F ii=0; ii<length; ++ii )
     {
         WriteBit(stat, code);
@@ -361,6 +334,7 @@ void WritePalette( const Palette* pPal, FILE* f )
         fputc(g, f);
         fputc(b, f);
     }
+    
     fputc(255, f);  // last color: always white
     fputc(255, f);
     fputc(255, f);
@@ -414,22 +388,7 @@ void WriteLzwImage(FILE* f, U8* image, U8* oldImage, U32 left, U32 top,  U32 wid
     {
         for(I32F xx=0; xx<width; ++xx)
         {
-            U8 r = image[(yy*width+xx)*4];
-            U8 g = image[(yy*width+xx)*4+1];
-            U8 b = image[(yy*width+xx)*4+2];
-            U8 a = image[(yy*width+xx)*4+3];
-            U8 nextValue = Palettize(&r, &g, &b, pal);
-            
-            if( a == 0 )
-            {
-                nextValue = 1;
-            }
-            else
-            {
-                oldImage[(yy*width+xx)*4] = r;
-                oldImage[(yy*width+xx)*4+1] = g;
-                oldImage[(yy*width+xx)*4+2] = b;
-            }
+            U8 nextValue = image[(yy*width+xx)*4+3];
             
             // "loser mode" - no compression, every single code is followed immediately by a clear
             //WriteCode( f, stat, nextValue, codeSize );
@@ -487,22 +446,46 @@ void SetTransparency( U8* oldImg, U8* newImg, U32 width, U32 height )
         if( oldImg[0] == newImg[0] &&
             oldImg[1] == newImg[1] &&
             oldImg[2] == newImg[2] )
-            newImg[3] = 0;
+        {
+            newImg[0] = newImg[1] = newImg[2] = newImg[3] = 0;
+        }
         else
+        {
             newImg[3] = 255;
+        }
         
         oldImg += 4;
         newImg += 4;
     }
 }
 
-void WriteOverTransparency( U8* img, U32 width, U32 height )
+void WriteOutPalette( U8* oldImg, U8* newImg, U32 width, U32 height, Palette& pal )
 {
     U32 numPixels = width*height;
     for( U32F ii=0; ii<numPixels; ++ii )
     {
-        img[3] = 255;
-        img += 4;
+        U8 a = newImg[3];
+        
+        if( a )
+        {        
+            U8 r = newImg[0];
+            U8 g = newImg[1];
+            U8 b = newImg[2];
+            U8 p = Palettize(&r, &g, &b, pal);
+        
+            newImg[3] = p;
+            
+            oldImg[0] = r;
+            oldImg[1] = g;
+            oldImg[2] = b;
+        }
+        else
+        {
+            newImg[3] = 1;
+        }
+        
+        oldImg += 4;
+        newImg += 4;
     }
 }
 
@@ -517,12 +500,11 @@ void BeginGif( GifWriter* writer, U8* image, U32 width, U32 height, U32 delay )
 {
     writer->f = fopen("/Users/ctangora/cmt-test.gif", "wb");
     ALWAYS_ASSERT(writer->f);
-    
-    MakePalette(image, width, height, &writer->pal);
-    WriteOverTransparency(image, width, height);
-    
     writer->oldImage = (U8*)malloc(width*height*4);
     memcpy(writer->oldImage, image, width*height*4);
+    
+    MakePalette(image, width, height, &writer->pal);
+    WriteOutPalette(writer->oldImage, image, width, height, writer->pal);
     
     fputs("GIF89a", writer->f);
     
@@ -560,11 +542,9 @@ void BeginGif( GifWriter* writer, U8* image, U32 width, U32 height, U32 delay )
 
 void ContinueGif( GifWriter* writer, U8* image, U32 width, U32 height, U32 delay )
 {
-    //Palette pal;
-    //MakePalette(image, width, height, &pal);
-    //WriteOverTransparency(image, width, height);
-    TransferPalette(&writer->pal, image, width, height);
     SetTransparency(writer->oldImage, image, width, height);
+    TransferPalette(&writer->pal, image, width, height);
+    WriteOutPalette(writer->oldImage, image, width, height, writer->pal);
     
     WriteLzwImage(writer->f, image, writer->oldImage, 0, 0, width, height, delay, writer->pal);
 }
