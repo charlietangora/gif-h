@@ -496,9 +496,9 @@ struct GifWriter
     U8* oldImage;
 };
 
-void BeginGif( GifWriter* writer, U8* image, U32 width, U32 height, U32 delay )
+void BeginGif( GifWriter* writer, const char* filename, U8* image, U32 width, U32 height, U32 delay )
 {
-    writer->f = fopen("/Users/ctangora/cmt-test.gif", "wb");
+    writer->f = fopen(filename, "wb");
     ALWAYS_ASSERT(writer->f);
     writer->oldImage = (U8*)malloc(width*height*4);
     memcpy(writer->oldImage, image, width*height*4);
