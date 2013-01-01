@@ -388,7 +388,7 @@ void WriteLzwImage(FILE* f, uint8_t* image, uint8_t* oldImage, uint32_t left, ui
     
     WriteCode(f, stat, 256, codeSize);
     
-    for(int32_t yy=height-1; yy>=0; --yy)
+    for(int32_t yy=0; yy<height; ++yy)
     {
         for(int32_t xx=0; xx<width; ++xx)
         {
