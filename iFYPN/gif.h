@@ -15,12 +15,57 @@
 #include <map>
 #include <vector>
 #include <algorithm>
-typedef std::map<uint32_t, std::pair<uint32_t, uint32_t> > Palette;
+// typedef std::map<uint32_t, std::pair<uint32_t, uint32_t> > Palette;
+
+struct Palette
+{
+    std::vector<uint32_t> m_colors;
+    std::map<uint32_t, uint32_t > m_count;
+    std::map<uint32_t, uint32_t > m_pal;
+    
+    void IncCount( uint8_t r, uint8_t g, uint8_t b )
+    {
+        uint32_t rgb = (r << 16) | (g << 8) | b;
+        if(m_count.find(rgb) != m_count.end())
+            m_count[rgb]++;
+        else
+        {
+            m_colors.push_back(rgb);
+            m_count[rgb] = 1;
+        }
+    }
+    
+    void GetLinearPalette( uint32_t* palette ) const
+    {
+        for(std::map<uint32_t, uint32_t >::const_iterator it = m_pal.begin(); it != m_pal.end(); ++it)
+        {
+            uint32_t entry = it->second;
+            
+            palette[entry >> 24] = entry;
+        }
+    }
+    
+    uint32_t GetPaletteEntry( uint8_t r, uint8_t g, uint8_t b )
+    {
+        uint32_t orgb = (r << 16) | (g << 8) | b;
+        return m_pal[orgb];
+    }
+    
+    void AssignColor( uint8_t r, uint8_t g, uint8_t b, uint8_t paletteEntry, uint8_t pal_r, uint8_t pal_g, uint8_t pal_b )
+    {
+        uint32_t orgb = (r << 16) | (g << 8) | b;
+        uint32_t prgb = (paletteEntry << 24) | (pal_r << 16) | (pal_g << 8) | pal_b;
+        
+        m_pal[orgb] = prgb;
+    }
+    
+    void Clear() { m_pal.clear(); }
+};
 
 uint8_t Palettize( uint8_t* r, uint8_t* g, uint8_t* b, Palette& pal )
 {
-    uint32_t orgb = (*r << 16) | (*g << 8) | *b;
-    uint32_t prgb = pal[orgb].second;
+    uint32_t prgb = pal.GetPaletteEntry(*r, *g, *b);
+
     *r = (prgb >> 16) & 0xff;
     *g = (prgb >> 8) & 0xff;
     *b = (prgb) & 0xff;
@@ -29,33 +74,34 @@ uint8_t Palettize( uint8_t* r, uint8_t* g, uint8_t* b, Palette& pal )
 
 void AssignColors( Palette* pPal, uint32_t* rPal, uint32_t* gPal, uint32_t* bPal )
 {
-    for (Palette::iterator it = pPal->begin(); it != pPal->end(); ++it)
+    std::vector<uint32_t>& colors = pPal->m_colors;
+    
+    for (int ii=0; ii<colors.size(); ++ii)
     {
-        uint32_t rgb = it->first;
+        uint32_t rgb = colors[ii];
         uint32_t r = rgb >> 16;
         uint32_t g = (rgb >> 8) & 0xff;
         uint32_t b = rgb & 0xff;
         
         uint32_t bestDiff = 10000;
         uint32_t bestInd = 256;
-        for( uint32_t ii=0; ii<256; ++ii )
+        for( uint32_t jj=0; jj<256; ++jj )
         {
-            uint32_t diff = abs((int32_t)r-(int32_t)rPal[ii]) + abs((int32_t)g-(int32_t)gPal[ii]) + abs((int32_t)b-(int32_t)bPal[ii]);
+            uint32_t diff = abs((int32_t)r-(int32_t)rPal[jj]) + abs((int32_t)g-(int32_t)gPal[jj]) + abs((int32_t)b-(int32_t)bPal[jj]);
             if( diff < bestDiff )
             {
                 bestDiff = diff;
-                bestInd = ii;
+                bestInd = jj;
             }
         }
         
-        uint32_t prgb = (bestInd << 24) | (rPal[bestInd] << 16) | (gPal[bestInd] << 8) | (bPal[bestInd]);
-        it->second.second = prgb;
+        pPal->AssignColor(r, g, b, bestInd, rPal[bestInd], gPal[bestInd], bPal[bestInd]);
     }
 }
 
 void FillInitialPalette( uint8_t* image, uint32_t width, uint32_t height, Palette* pPal )
 {
-    pPal->clear();
+    pPal->Clear();
     
     uint32_t numPixels = width*height;
     for( uint32_t ii=0; ii<numPixels; ++ii )
@@ -64,16 +110,7 @@ void FillInitialPalette( uint8_t* image, uint32_t width, uint32_t height, Palett
         uint8_t g = image[ii*4+1];
         uint8_t b = image[ii*4+2];
         
-        uint32_t rgb = (r << 16) | (g << 8) | b;
-        
-        if(pPal->find(rgb) != pPal->end())
-        {
-            (*pPal)[rgb].first++;
-        }
-        else
-        {
-            (*pPal)[rgb] = std::pair<uint32_t,uint32_t>(0,0);
-        }
+        pPal->IncCount(r,g,b);
     }
 }
 
@@ -90,15 +127,17 @@ void KMeansIterate( uint8_t* image, uint32_t width, uint32_t height, Palette* pP
     bzero(bAvg, sizeof(count));
     bzero(count, sizeof(count));
     
-    for (Palette::iterator it = pPal->begin(); it != pPal->end(); ++it)
+    const std::vector<uint32_t>& colors = pPal->m_colors;
+    
+    for (uint32_t ii=0; ii<colors.size(); ++ii)
     {
-        uint32_t rgb = it->first;
+        uint32_t rgb = colors[ii];
         uint32_t r = rgb >> 16;
         uint32_t g = (rgb >> 8) & 0xff;
         uint32_t b = rgb & 0xff;
         
-        uint32_t palCount = it->second.first;
-        uint32_t p = it->second.second >> 24;
+        uint32_t palCount = pPal->m_count.find(rgb)->second;
+        uint32_t p = pPal->m_pal.find(rgb)->second >> 24;
         
         rAvg[p] += r * palCount;
         gAvg[p] += g * palCount;
@@ -127,19 +166,19 @@ void KMeansIterate( uint8_t* image, uint32_t width, uint32_t height, Palette* pP
     rAvg[255] = gAvg[255] = bAvg[255] = 255;
     
     std::vector< std::pair<uint64_t, uint32_t> > paletteDists;
-    for (Palette::iterator it = pPal->begin(); it != pPal->end(); ++it)
+    for (uint32_t ii=0; ii<colors.size(); ++ii)
     {
-        uint32_t orgb = it->first;
+        uint32_t orgb = colors[ii];
         int32_t oor = orgb >> 16;
         int32_t og = (orgb >> 8) & 0xff;
         int32_t ob = orgb & 0xff;
         
-        uint32_t prgb = it->second.second;
+        uint32_t prgb = pPal->m_pal[orgb];
         int32_t pr = prgb >> 16;
         int32_t pg = (prgb >> 8) & 0xff;
         int32_t pb = prgb & 0xff;
         
-        uint32_t pcount = it->second.first;
+        uint32_t pcount = pPal->m_count[orgb];
         uint64_t dist = (abs(oor-pr) + abs(og-pg) + abs(ob-pb)) * pcount;
         
         paletteDists.push_back(std::pair<uint64_t, uint32_t>(dist, orgb));
@@ -196,9 +235,11 @@ void MakePalette( uint8_t* image, uint32_t width, uint32_t height, Palette* pPal
 
 void GetLinearPalette( const Palette* pPal, uint32_t* rLst, uint32_t* gLst, uint32_t* bLst )
 {
-    for (Palette::const_iterator it = pPal->begin(); it != pPal->end(); ++it)
+    const std::vector<uint32_t>& colors = pPal->m_colors;
+    
+    for (int ii=0; ii<colors.size(); ++ii)
     {
-        uint32_t prgb = it->second.second;
+        uint32_t prgb = pPal->m_pal.find(colors[ii])->second;
         uint32_t p = (prgb >> 24) & 0xff;
         uint32_t r = (prgb >> 16) & 0xff;
         uint32_t g = (prgb >> 8) & 0xff;
@@ -312,13 +353,7 @@ void WritePalette( const Palette* pPal, FILE* f )
 {
     uint32_t cols[256];
     
-    for (Palette::const_iterator it = pPal->begin(); it != pPal->end(); ++it)
-    {
-        uint32_t prgb = it->second.second;
-        uint32_t p = (prgb >> 24) & 0xff;
-        
-        cols[p] = prgb;
-    }
+    pPal->GetLinearPalette(cols);
     
     fputc(0, f);  // first and second colors: always black
     fputc(0, f);
