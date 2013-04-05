@@ -477,54 +477,54 @@ void WriteLzwImage(FILE* f, uint8_t* image, uint8_t* oldImage, uint32_t left, ui
     fputc(0, f); // image block terminator
 }
 
-void SetTransparency( uint8_t* oldImg, uint8_t* newImg, uint32_t width, uint32_t height )
+void SetTransparency( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32_t height )
 {
     uint32_t numPixels = width*height;
     for( uint32_t ii=0; ii<numPixels; ++ii )
     {
-        if( oldImg[0] == newImg[0] &&
-            oldImg[1] == newImg[1] &&
-            oldImg[2] == newImg[2] )
+        if( lastFrame[0] == nextFrame[0] &&
+            lastFrame[1] == nextFrame[1] &&
+            lastFrame[2] == nextFrame[2] )
         {
-            newImg[0] = newImg[1] = newImg[2] = newImg[3] = 0;
+            nextFrame[0] = nextFrame[1] = nextFrame[2] = nextFrame[3] = 0;
         }
         else
         {
-            newImg[3] = 255;
+            nextFrame[3] = 255;
         }
         
-        oldImg += 4;
-        newImg += 4;
+        lastFrame += 4;
+        nextFrame += 4;
     }
 }
 
-void WriteOutPalette( uint8_t* oldImg, uint8_t* newImg, uint32_t width, uint32_t height, Palette& pal )
+void WriteOutPalette( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32_t height, Palette& pal )
 {
     uint32_t numPixels = width*height;
     for( uint32_t ii=0; ii<numPixels; ++ii )
     {
-        uint8_t a = newImg[3];
+        uint8_t a = nextFrame[3];
         
         if( a )
         {        
-            uint8_t r = newImg[0];
-            uint8_t g = newImg[1];
-            uint8_t b = newImg[2];
+            uint8_t r = nextFrame[0];
+            uint8_t g = nextFrame[1];
+            uint8_t b = nextFrame[2];
             uint8_t p = Palettize(&r, &g, &b, pal);
         
-            newImg[3] = p;
+            nextFrame[3] = p;
             
-            oldImg[0] = r;
-            oldImg[1] = g;
-            oldImg[2] = b;
+            lastFrame[0] = r;
+            lastFrame[1] = g;
+            lastFrame[2] = b;
         }
         else
         {
-            newImg[3] = 1;
+            nextFrame[3] = 1;
         }
         
-        oldImg += 4;
-        newImg += 4;
+        lastFrame += 4;
+        nextFrame += 4;
     }
 }
 
