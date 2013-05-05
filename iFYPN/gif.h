@@ -17,6 +17,10 @@
 #include <algorithm>
 // typedef std::map<uint32_t, std::pair<uint32_t, uint32_t> > Palette;
 
+// Stores a color palette and also
+// the 32-bit -> 8-bit mapping decisions that have been made
+// as part of the palette's creation
+// Wraps STL classes, I hope someday to remove the STL dependency
 struct Palette
 {
     std::vector<uint32_t> m_colors;
