@@ -41,6 +41,8 @@ struct Palette
     
     void GetLinearPalette( uint32_t* palette ) const
     {
+        bzero(palette, sizeof(uint32_t)*256);
+        
         for(std::map<uint32_t, uint32_t >::const_iterator it = m_pal.begin(); it != m_pal.end(); ++it)
         {
             uint32_t entry = it->second;
@@ -61,9 +63,15 @@ struct Palette
         uint32_t prgb = (paletteEntry << 24) | (pal_r << 16) | (pal_g << 8) | pal_b;
         
         m_pal[orgb] = prgb;
+        m_pal[prgb & 0x00ffffff] = prgb;
     }
     
-    void Clear() { m_pal.clear(); }
+    void Clear()
+    {
+        m_pal.clear();
+        m_colors.clear();
+        m_count.clear();
+    }
 };
 
 uint8_t Palettize( uint8_t* r, uint8_t* g, uint8_t* b, Palette& pal )
@@ -133,6 +141,10 @@ void KMeansIterate( uint8_t* image, uint32_t width, uint32_t height, Palette* pP
     
     const std::vector<uint32_t>& colors = pPal->m_colors;
     
+    uint32_t maxR_r = 0, maxR_g = 0, maxR_b = 0;
+    uint32_t maxG_r = 0, maxG_g = 0, maxG_b = 0;
+    uint32_t maxB_r = 0, maxB_g = 0, maxB_b = 0;
+    
     for (uint32_t ii=0; ii<colors.size(); ++ii)
     {
         uint32_t rgb = colors[ii];
@@ -142,6 +154,10 @@ void KMeansIterate( uint8_t* image, uint32_t width, uint32_t height, Palette* pP
         
         uint32_t palCount = pPal->m_count.find(rgb)->second;
         uint32_t p = pPal->m_pal.find(rgb)->second >> 24;
+        
+        if(r > maxR_r) { maxR_r = r; maxR_g = g; maxR_b = b; }
+        if(g > maxG_g) { maxG_r = r; maxG_g = g; maxG_b = b; }
+        if(b > maxG_b) { maxB_r = r; maxB_g = g; maxB_b = b; }
         
         rAvg[p] += r * palCount;
         gAvg[p] += g * palCount;
@@ -167,6 +183,10 @@ void KMeansIterate( uint8_t* image, uint32_t width, uint32_t height, Palette* pP
     
     rAvg[0] = gAvg[0] = bAvg[0] = 0;
     rAvg[1] = gAvg[1] = bAvg[1] = 0;
+    
+    rAvg[252] = maxR_r; gAvg[252] = maxR_g; bAvg[252] = maxR_b;
+    rAvg[253] = maxG_r; gAvg[253] = maxG_g; bAvg[253] = maxG_b;
+    rAvg[254] = maxB_r; gAvg[254] = maxB_g; bAvg[254] = maxB_b;
     rAvg[255] = gAvg[255] = bAvg[255] = 255;
     
     std::vector< std::pair<uint64_t, uint32_t> > paletteDists;
@@ -189,7 +209,7 @@ void KMeansIterate( uint8_t* image, uint32_t width, uint32_t height, Palette* pP
     }
     std::sort(paletteDists.begin(), paletteDists.end());
     
-    for( uint32_t ii=2; ii<255; ++ii )
+    for( uint32_t ii=2; ii<252; ++ii )
     {
         if( count[ii] == 0 && paletteDists.size() > 0 )
         {
@@ -239,6 +259,10 @@ void MakePalette( uint8_t* image, uint32_t width, uint32_t height, Palette* pPal
 
 void GetLinearPalette( const Palette* pPal, uint32_t* rLst, uint32_t* gLst, uint32_t* bLst )
 {
+    bzero(rLst, sizeof(uint32_t)*256);
+    bzero(gLst, sizeof(uint32_t)*256);
+    bzero(bLst, sizeof(uint32_t)*256);
+    
     const std::vector<uint32_t>& colors = pPal->m_colors;
     
     for (int ii=0; ii<colors.size(); ++ii)
@@ -490,7 +514,8 @@ void SetTransparency( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, ui
             lastFrame[1] == nextFrame[1] &&
             lastFrame[2] == nextFrame[2] )
         {
-            nextFrame[0] = nextFrame[1] = nextFrame[2] = nextFrame[3] = 0;
+            // nextFrame[0] = nextFrame[1] = nextFrame[2] = nextFrame[3] = 0;
+            nextFrame[3] = 0;
         }
         else
         {
@@ -502,7 +527,125 @@ void SetTransparency( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, ui
     }
 }
 
-void WriteOutPalette( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32_t height, Palette& pal )
+void DitherImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32_t height, Palette& pal )
+{
+    uint32_t rPal[256];
+    uint32_t gPal[256];
+    uint32_t bPal[256];
+    GetLinearPalette(&pal, rPal, gPal, bPal);
+    
+    uint32_t numPixels = width*height;
+    int32_t* quantPixels = (int32_t*)malloc(sizeof(int32_t)*numPixels*4);
+    
+    for( uint32_t ii=0; ii<numPixels*4; ++ii )
+    {
+        uint8_t pix = nextFrame[ii];
+        uint16_t pix16 = (uint16_t)(pix) << 8;
+        quantPixels[ii] = pix16;
+    }
+    
+    for( uint32_t yy=0; yy<height; ++yy )
+    {
+        for( uint32_t xx=0; xx<width; ++xx )
+        {
+            int32_t* nextPix = quantPixels + 4*(yy*width+xx);
+            uint8_t* lastPix = lastFrame? lastFrame + 4*(yy*width+xx) : NULL;
+            
+            uint8_t rr = nextPix[0] >> 8;
+            uint8_t gg = nextPix[1] >> 8;
+            uint8_t bb = nextPix[2] >> 8;
+            
+            if( lastFrame &&
+                lastPix[0] == rr &&
+                lastPix[1] == gg &&
+                lastPix[2] == bb )
+            {
+                nextPix[0] = rr;
+                nextPix[1] = gg;
+                nextPix[2] = bb;
+                nextPix[3] = 1;
+                continue;
+            }
+            
+            int32_t bestDiff = 1000000;
+            int32_t bestInd = 256;
+            
+            int32_t r_err;
+            int32_t g_err;
+            int32_t b_err;
+
+            for( uint32_t jj=0; jj<256; ++jj )
+            {
+                int32_t r_ierr = ((int32_t)nextPix[0]) - (((int32_t)rPal[jj]) << 8);
+                int32_t g_ierr = ((int32_t)nextPix[1]) - (((int32_t)gPal[jj]) << 8);
+                int32_t b_ierr = ((int32_t)nextPix[2]) - (((int32_t)bPal[jj]) << 8);
+                
+                int32_t diff = abs(r_ierr)+abs(g_ierr)+abs(b_ierr);
+                if( diff < bestDiff )
+                {
+                    bestDiff = diff;
+                    bestInd = jj;
+                    r_err = r_ierr;
+                    g_err = g_ierr;
+                    b_err = b_ierr;
+                }
+            }
+            
+            nextPix[0] = rPal[bestInd];
+            nextPix[1] = gPal[bestInd];
+            nextPix[2] = bPal[bestInd];
+            nextPix[3] = bestInd;
+            
+            int quantloc_7 = (yy*width+xx+1);
+            int quantloc_3 = (yy*width+width+xx-1);
+            int quantloc_5 = (yy*width+width+xx);
+            int quantloc_1 = (yy*width+width+xx+1);
+            
+            if(quantloc_7 < numPixels)
+            {
+                int32_t* pix7 = quantPixels+4*quantloc_7;
+                pix7[0] += r_err * 7 / 16;
+                pix7[1] += g_err * 7 / 16;
+                pix7[2] += b_err * 7 / 16;
+            }
+            
+            if(quantloc_3 < numPixels)
+            {
+                int32_t* pix3 = quantPixels+4*quantloc_3;
+                pix3[0] += r_err * 3 / 16;
+                pix3[1] += g_err * 3 / 16;
+                pix3[2] += b_err * 3 / 16;
+            }
+            
+            if(quantloc_5 < numPixels)
+            {
+                int32_t* pix5 = quantPixels+4*quantloc_5;
+                pix5[0] += r_err * 5 / 16;
+                pix5[1] += g_err * 5 / 16;
+                pix5[2] += b_err * 5 / 16;
+            }
+            
+            if(quantloc_1 < numPixels)
+            {
+                int32_t* pix1 = quantPixels+4*quantloc_1;
+                pix1[0] += r_err / 16;
+                pix1[1] += g_err / 16;
+                pix1[2] += b_err / 16;
+            }
+        }
+    }
+    
+    for( uint32_t ii=0; ii<numPixels*4; ++ii )
+    {
+        nextFrame[ii] = quantPixels[ii];
+        if(lastFrame)
+            lastFrame[ii] = quantPixels[ii];
+    }
+    
+    free(quantPixels);
+}
+
+void WritePaletteResultsToImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32_t height, Palette& pal )
 {
     uint32_t numPixels = width*height;
     for( uint32_t ii=0; ii<numPixels; ++ii )
@@ -547,7 +690,9 @@ void BeginGif( GifWriter* writer, const char* filename, uint8_t* image, uint32_t
     memcpy(writer->oldImage, image, width*height*4);
     
     MakePalette(image, width, height, &writer->pal);
-    WriteOutPalette(writer->oldImage, image, width, height, writer->pal);
+    
+    //DitherImage(NULL, image, width, height, writer->pal);
+    WritePaletteResultsToImage(writer->oldImage, image, width, height, writer->pal);
     
     fputs("GIF89a", writer->f);
     
@@ -587,7 +732,9 @@ void ContinueGif( GifWriter* writer, uint8_t* image, uint32_t width, uint32_t he
 {
     SetTransparency(writer->oldImage, image, width, height);
     TransferPalette(&writer->pal, image, width, height);
-    WriteOutPalette(writer->oldImage, image, width, height, writer->pal);
+    
+    DitherImage(writer->oldImage, image, width, height, writer->pal);
+    //WritePaletteResultsToImage(writer->oldImage, image, width, height, writer->pal);
     
     WriteLzwImage(writer->f, image, writer->oldImage, 0, 0, width, height, delay, writer->pal);
 }
