@@ -567,13 +567,13 @@ void DitherImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32
                 continue;
             }
             
-            int32_t bestDiff = 1000000;
-            int32_t bestInd = 256;
+            int32_t r_err = ((int32_t)nextPix[0]) - (((int32_t)lastPix[0]) << 8);
+            int32_t g_err = ((int32_t)nextPix[1]) - (((int32_t)lastPix[1]) << 8);
+            int32_t b_err = ((int32_t)nextPix[2]) - (((int32_t)lastPix[2]) << 8);
             
-            int32_t r_err;
-            int32_t g_err;
-            int32_t b_err;
-
+            int32_t bestDiff = abs(r_err)+abs(g_err)+abs(b_err);
+            int32_t bestInd = 1;
+            
             for( uint32_t jj=0; jj<256; ++jj )
             {
                 int32_t r_ierr = ((int32_t)nextPix[0]) - (((int32_t)rPal[jj]) << 8);
@@ -594,7 +594,18 @@ void DitherImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32
             nextPix[0] = rPal[bestInd];
             nextPix[1] = gPal[bestInd];
             nextPix[2] = bPal[bestInd];
-            nextPix[3] = bestInd;
+            
+            if( lastFrame &&
+               lastPix[0] == nextPix[0] &&
+               lastPix[1] == nextPix[1] &&
+               lastPix[2] == nextPix[2] )
+            {
+                nextPix[3] = 1;
+            }
+            else
+            {
+                nextPix[3] = bestInd;
+            }
             
             int quantloc_7 = (yy*width+xx+1);
             int quantloc_3 = (yy*width+width+xx-1);
