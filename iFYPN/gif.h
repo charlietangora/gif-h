@@ -12,289 +12,192 @@
 #include <stdio.h>
 #include <stdint.h>
 
-#include <map>
-#include <vector>
-#include <algorithm>
-// typedef std::map<uint32_t, std::pair<uint32_t, uint32_t> > Palette;
-
-// Stores a color palette and also
-// the 32-bit -> 8-bit mapping decisions that have been made
-// as part of the palette's creation
-// Wraps STL classes, I hope someday to remove the STL dependency
 struct Palette
 {
-    std::vector<uint32_t> m_colors;
-    std::map<uint32_t, uint32_t > m_count;
-    std::map<uint32_t, uint32_t > m_pal;
-    
-    void IncCount( uint8_t r, uint8_t g, uint8_t b )
-    {
-        uint32_t rgb = (r << 16) | (g << 8) | b;
-        if(m_count.find(rgb) != m_count.end())
-            m_count[rgb]++;
-        else
-        {
-            m_colors.push_back(rgb);
-            m_count[rgb] = 1;
-        }
-    }
-    
-    void GetLinearPalette( uint32_t* palette ) const
-    {
-        bzero(palette, sizeof(uint32_t)*256);
-        
-        for(std::map<uint32_t, uint32_t >::const_iterator it = m_pal.begin(); it != m_pal.end(); ++it)
-        {
-            uint32_t entry = it->second;
-            
-            palette[entry >> 24] = entry;
-        }
-    }
-    
-    uint32_t GetPaletteEntry( uint8_t r, uint8_t g, uint8_t b )
-    {
-        uint32_t orgb = (r << 16) | (g << 8) | b;
-        return m_pal[orgb];
-    }
-    
-    void AssignColor( uint8_t r, uint8_t g, uint8_t b, uint8_t paletteEntry, uint8_t pal_r, uint8_t pal_g, uint8_t pal_b )
-    {
-        uint32_t orgb = (r << 16) | (g << 8) | b;
-        uint32_t prgb = (paletteEntry << 24) | (pal_r << 16) | (pal_g << 8) | pal_b;
-        
-        m_pal[orgb] = prgb;
-        m_pal[prgb & 0x00ffffff] = prgb;
-    }
-    
-    void Clear()
-    {
-        m_pal.clear();
-        m_colors.clear();
-        m_count.clear();
-    }
+    uint32_t r[256];
+    uint32_t g[256];
+    uint32_t b[256];
 };
 
-uint8_t Palettize( uint8_t* r, uint8_t* g, uint8_t* b, Palette& pal )
+void SwapPixels(uint8_t* image, int pixA, int pixB)
 {
-    uint32_t prgb = pal.GetPaletteEntry(*r, *g, *b);
-
-    *r = (prgb >> 16) & 0xff;
-    *g = (prgb >> 8) & 0xff;
-    *b = (prgb) & 0xff;
-    return (prgb >> 24) & 0xff;
+    uint8_t rA = image[pixA*4];
+    uint8_t gA = image[pixA*4+1];
+    uint8_t bA = image[pixA*4+2];
+    uint8_t aA = image[pixA*4+3];
+    
+    uint8_t rB = image[pixB*4];
+    uint8_t gB = image[pixB*4+1];
+    uint8_t bB = image[pixB*4+2];
+    uint8_t aB = image[pixA*4+3];
+    
+    image[pixA*4] = rB;
+    image[pixA*4+1] = gB;
+    image[pixA*4+2] = bB;
+    image[pixA*4+3] = aB;
+    
+    image[pixB*4] = rA;
+    image[pixB*4+1] = gA;
+    image[pixB*4+2] = bA;
+    image[pixB*4+3] = aA;
 }
 
-void AssignColors( Palette* pPal, uint32_t* rPal, uint32_t* gPal, uint32_t* bPal )
+int Partition(uint8_t* image, const int left, const int right, const int elt, int pivotIndex)
 {
-    std::vector<uint32_t>& colors = pPal->m_colors;
-    
-    for (int ii=0; ii<colors.size(); ++ii)
+    const int pivotValue = image[(pivotIndex)*4+elt];
+    SwapPixels(image, pivotIndex, right-1);
+    int storeIndex = left;
+    bool split = 0;
+    for(int ii=left; ii<right-1; ++ii)
     {
-        uint32_t rgb = colors[ii];
-        uint32_t r = rgb >> 16;
-        uint32_t g = (rgb >> 8) & 0xff;
-        uint32_t b = rgb & 0xff;
-        
-        uint32_t bestDiff = 10000;
-        uint32_t bestInd = 256;
-        for( uint32_t jj=0; jj<256; ++jj )
+        int arrayVal = image[ii*4+elt];
+        if( arrayVal < pivotValue )
         {
-            uint32_t diff = abs((int32_t)r-(int32_t)rPal[jj]) + abs((int32_t)g-(int32_t)gPal[jj]) + abs((int32_t)b-(int32_t)bPal[jj]);
-            if( diff < bestDiff )
+            SwapPixels(image, ii, storeIndex);
+            ++storeIndex;
+        }
+        else if( arrayVal == pivotValue )
+        {
+            if(split)
             {
-                bestDiff = diff;
-                bestInd = jj;
+                SwapPixels(image, ii, storeIndex);
+                ++storeIndex;
             }
+            split = !split;
         }
+    }
+    SwapPixels(image, storeIndex, right-1);
+    return storeIndex;
+}
+
+// Perform an incomplete sort, finding all elements above and below the desired median
+void PartitionByMedian(uint8_t* image, int left, int right, int elt, int neededCenter)
+{
+    if(left < right-1)
+    {
+        int pivotIndex = left + (right-left)/2;
+    
+        pivotIndex = Partition(image, left, right, elt, pivotIndex);
         
-        pPal->AssignColor(r, g, b, bestInd, rPal[bestInd], gPal[bestInd], bPal[bestInd]);
+        if(pivotIndex > neededCenter)
+            PartitionByMedian(image, left, pivotIndex, elt, neededCenter);
+        
+        if(pivotIndex < neededCenter)
+            PartitionByMedian(image, pivotIndex+1, right, elt, neededCenter);
     }
 }
 
-void FillInitialPalette( uint8_t* image, uint32_t width, uint32_t height, Palette* pPal )
+void SplitPalette(uint8_t* image, int numPixels, int firstElt, int numElts, Palette* pal)
 {
-    pPal->Clear();
-    
-    uint32_t numPixels = width*height;
-    for( uint32_t ii=0; ii<numPixels; ++ii )
+    if(numElts == 1)
     {
-        uint8_t r = image[ii*4];
-        uint8_t g = image[ii*4+1];
-        uint8_t b = image[ii*4+2];
-        
-        pPal->IncCount(r,g,b);
-    }
-}
-
-void KMeansIterate( uint8_t* image, uint32_t width, uint32_t height, Palette* pPal )
-{
-    uint32_t rAvg[256];
-    uint32_t gAvg[256];
-    uint32_t bAvg[256];
-    
-    uint32_t count[256];
-    
-    bzero(rAvg, sizeof(count));
-    bzero(gAvg, sizeof(count));
-    bzero(bAvg, sizeof(count));
-    bzero(count, sizeof(count));
-    
-    const std::vector<uint32_t>& colors = pPal->m_colors;
-    
-    uint32_t maxR_r = 0, maxR_g = 0, maxR_b = 0;
-    uint32_t maxG_r = 0, maxG_g = 0, maxG_b = 0;
-    uint32_t maxB_r = 0, maxB_g = 0, maxB_b = 0;
-    
-    for (uint32_t ii=0; ii<colors.size(); ++ii)
-    {
-        uint32_t rgb = colors[ii];
-        uint32_t r = rgb >> 16;
-        uint32_t g = (rgb >> 8) & 0xff;
-        uint32_t b = rgb & 0xff;
-        
-        uint32_t palCount = pPal->m_count.find(rgb)->second;
-        uint32_t p = pPal->m_pal.find(rgb)->second >> 24;
-        
-        if(r > maxR_r) { maxR_r = r; maxR_g = g; maxR_b = b; }
-        if(g > maxG_g) { maxG_r = r; maxG_g = g; maxG_b = b; }
-        if(b > maxG_b) { maxB_r = r; maxB_g = g; maxB_b = b; }
-        
-        rAvg[p] += r * palCount;
-        gAvg[p] += g * palCount;
-        bAvg[p] += b * palCount;
-        count[p] += palCount;
-    }
-    
-    for( uint32_t ii=2; ii<255; ++ii )
-    {
-        if( count[ii] > 0 )
+        int r=0, g=0, b=0;
+        for(int ii=0; ii<numPixels; ++ii)
         {
-            uint32_t bias = count[ii]/2;
-            
-            rAvg[ii] += bias;
-            gAvg[ii] += bias;
-            bAvg[ii] += bias;
-            
-            rAvg[ii] /= count[ii];
-            gAvg[ii] /= count[ii];
-            bAvg[ii] /= count[ii];
+            r += image[ii*4+0];
+            g += image[ii*4+1];
+            b += image[ii*4+2];
         }
+        
+        r += numPixels / 2;
+        g += numPixels / 2;
+        b += numPixels / 2;
+        
+        r /= numPixels;
+        g /= numPixels;
+        b /= numPixels;
+        
+        pal->r[firstElt] = r;
+        pal->g[firstElt] = g;
+        pal->b[firstElt] = b;
+        
+        return;
     }
     
-    rAvg[0] = gAvg[0] = bAvg[0] = 0;
-    rAvg[1] = gAvg[1] = bAvg[1] = 0;
-    
-    rAvg[252] = maxR_r; gAvg[252] = maxR_g; bAvg[252] = maxR_b;
-    rAvg[253] = maxG_r; gAvg[253] = maxG_g; bAvg[253] = maxG_b;
-    rAvg[254] = maxB_r; gAvg[254] = maxB_g; bAvg[254] = maxB_b;
-    rAvg[255] = gAvg[255] = bAvg[255] = 255;
-    
-    std::vector< std::pair<uint64_t, uint32_t> > paletteDists;
-    for (uint32_t ii=0; ii<colors.size(); ++ii)
+    int minR = 255, maxR = 0;
+    int minG = 255, maxG = 0;
+    int minB = 255, maxB = 0;
+    for(int ii=0; ii<numPixels; ++ii)
     {
-        uint32_t orgb = colors[ii];
-        int32_t oor = orgb >> 16;
-        int32_t og = (orgb >> 8) & 0xff;
-        int32_t ob = orgb & 0xff;
+        int r = image[ii*4+0];
+        int g = image[ii*4+1];
+        int b = image[ii*4+2];
         
-        uint32_t prgb = pPal->m_pal[orgb];
-        int32_t pr = prgb >> 16;
-        int32_t pg = (prgb >> 8) & 0xff;
-        int32_t pb = prgb & 0xff;
+        if(r > maxR) maxR = r;
+        if(r < minR) minR = r;
         
-        uint32_t pcount = pPal->m_count[orgb];
-        uint64_t dist = (abs(oor-pr) + abs(og-pg) + abs(ob-pb)) * pcount;
+        if(g > maxG) maxG = g;
+        if(g < minG) minG = g;
         
-        paletteDists.push_back(std::pair<uint64_t, uint32_t>(dist, orgb));
-    }
-    std::sort(paletteDists.begin(), paletteDists.end());
-    
-    for( uint32_t ii=2; ii<252; ++ii )
-    {
-        if( count[ii] == 0 && paletteDists.size() > 0 )
-        {
-            uint32_t col = paletteDists.back().second;
-            paletteDists.pop_back();
-            
-            rAvg[ii] = col >> 16;
-            gAvg[ii] = (col >> 8) & 0xff;
-            bAvg[ii] = col & 0xff;
-        }
+        if(b > maxB) maxB = b;
+        if(b < minB) minB = b;
     }
     
-    AssignColors(pPal, rAvg, gAvg, bAvg);
+    int rRange = maxR - minR;
+    int gRange = maxG - minG;
+    int bRange = maxB - minB;
+    
+    int splitElt = 1;
+    if(bRange > gRange) splitElt = 2;
+    if(rRange > bRange && rRange > gRange) splitElt = 0;
+    
+    int subEltsA = numElts/2;
+    int subEltsB = numElts-subEltsA;
+    
+    int subPixelsA = numPixels * subEltsA / numElts;
+    int subPixelsB = numPixels-subPixelsA;
+    
+    PartitionByMedian(image, 0, numPixels, splitElt, subPixelsA);
+    
+    SplitPalette(image,              subPixelsA, firstElt,          subEltsA, pal);
+    SplitPalette(image+subPixelsA*4, subPixelsB, firstElt+subEltsA, subEltsB, pal);
 }
 
 void MakePalette( uint8_t* image, uint32_t width, uint32_t height, Palette* pPal )
 {
-    FillInitialPalette(image, width, height, pPal);
+    pPal->r[0] = pPal->g[0] = pPal->b[0] = 0;
+    pPal->r[1] = pPal->g[1] = pPal->b[1] = 0;
     
-    uint32_t rBas[256];
-    uint32_t gBas[256];
-    uint32_t bBas[256];
+    pPal->r[255] = pPal->g[255] = pPal->b[255] = 255;
+    pPal->r[254] = pPal->g[254] = pPal->b[254] = 0;
+    pPal->r[253] = pPal->g[253] = pPal->b[253] = 0;
+    pPal->r[252] = pPal->g[252] = pPal->b[252] = 0;
     
-    rBas[0] = gBas[0] = bBas[0] = 0;
-    rBas[1] = gBas[1] = bBas[1] = 0;
-    rBas[255] = gBas[255] = bBas[255] = 255;
-    
-    for( uint32_t ii=2; ii<255; ++ii )
+    for(int ii=0; ii<width*height; ++ii)
     {
-        uint32_t x = rand() % width;
-        uint32_t y = rand() % height;
-        uint8_t r = image[(y*width+x)*4];
-        uint8_t g = image[(y*width+x)*4+1];
-        uint8_t b = image[(y*width+x)*4+2];
-        rBas[ii] = r;
-        gBas[ii] = g;
-        bBas[ii] = b;
-    }
-    
-    AssignColors(pPal, rBas, gBas, bBas);
-    
-    for(uint32_t ii=0; ii<5; ++ii)
-    {
-        KMeansIterate(image, width, height, pPal);
-    }
-}
-
-void GetLinearPalette( const Palette* pPal, uint32_t* rLst, uint32_t* gLst, uint32_t* bLst )
-{
-    bzero(rLst, sizeof(uint32_t)*256);
-    bzero(gLst, sizeof(uint32_t)*256);
-    bzero(bLst, sizeof(uint32_t)*256);
-    
-    const std::vector<uint32_t>& colors = pPal->m_colors;
-    
-    for (int ii=0; ii<colors.size(); ++ii)
-    {
-        uint32_t prgb = pPal->m_pal.find(colors[ii])->second;
-        uint32_t p = (prgb >> 24) & 0xff;
-        uint32_t r = (prgb >> 16) & 0xff;
-        uint32_t g = (prgb >> 8) & 0xff;
-        uint32_t b = (prgb) & 0xff;
+        int r = image[ii*4+0];
+        int g = image[ii*4+1];
+        int b = image[ii*4+2];
         
-        rLst[p] = r;
-        gLst[p] = g;
-        bLst[p] = b;
+        if( r > pPal->r[254] || (r == pPal->r[254] && (g > pPal->g[254] || b > pPal->b[254])) )
+        {
+            pPal->r[254] = r;
+            pPal->g[254] = g;
+            pPal->b[254] = b;
+        }
+        
+        if( g > pPal->g[253] || (g == pPal->g[253] && (r > pPal->r[253] || b > pPal->b[253])) )
+        {
+            pPal->r[253] = r;
+            pPal->g[253] = g;
+            pPal->b[253] = b;
+        }
+        
+        if( b > pPal->b[252] || (b == pPal->b[252] && (r > pPal->r[252] || b > pPal->b[252])) )
+        {
+            pPal->r[252] = r;
+            pPal->g[252] = g;
+            pPal->b[252] = b;
+        }
     }
     
-    rLst[0] = gLst[0] = bLst[0] = 0;
-    rLst[1] = gLst[1] = bLst[1] = 0;
-    rLst[255] = gLst[255] = bLst[255] = 255;
-}
-
-void TransferPalette( Palette* pPal, uint8_t* image, uint32_t width, uint32_t height )
-{
-    uint32_t rOld[256];
-    uint32_t gOld[256];
-    uint32_t bOld[256];
+    int imageSize = width*height*4*sizeof(uint8_t);
+    uint8_t* destroyableImage = (uint8_t*)malloc(imageSize);
+    memcpy(destroyableImage, image, imageSize);
     
-    GetLinearPalette(pPal, rOld, gOld, bOld);
+    SplitPalette(destroyableImage, width*height, 2, 250, pPal);
     
-    FillInitialPalette(image, width, height, pPal);
-    AssignColors(pPal, rOld, gOld, bOld);
-    
-    KMeansIterate(image, width, height, pPal);
+    free(destroyableImage);
 }
 
 struct BitStatus
@@ -379,10 +282,6 @@ void DeleteLzwTree( lzwNode* node )
 
 void WritePalette( const Palette* pPal, FILE* f )
 {
-    uint32_t cols[256];
-    
-    pPal->GetLinearPalette(cols);
-    
     fputc(0, f);  // first and second colors: always black
     fputc(0, f);
     fputc(0, f);
@@ -393,9 +292,9 @@ void WritePalette( const Palette* pPal, FILE* f )
     
     for(uint32_t ii=2; ii<255; ++ii)
     {
-        uint32_t r = (cols[ii] >> 16) & 0xff;
-        uint32_t g = (cols[ii] >> 8) & 0xff;
-        uint32_t b = (cols[ii]) & 0xff;
+        uint32_t r = pPal->r[ii];
+        uint32_t g = pPal->g[ii];
+        uint32_t b = pPal->b[ii];
         
         fputc(r, f);
         fputc(g, f);
@@ -529,11 +428,6 @@ void SetTransparency( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, ui
 
 void DitherImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32_t height, Palette& pal )
 {
-    uint32_t rPal[256];
-    uint32_t gPal[256];
-    uint32_t bPal[256];
-    GetLinearPalette(&pal, rPal, gPal, bPal);
-    
     uint32_t numPixels = width*height;
     int32_t* quantPixels = (int32_t*)malloc(sizeof(int32_t)*numPixels*4);
     
@@ -567,18 +461,18 @@ void DitherImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32
                 continue;
             }
             
-            int32_t r_err = ((int32_t)nextPix[0]) - (((int32_t)lastPix[0]) << 8);
-            int32_t g_err = ((int32_t)nextPix[1]) - (((int32_t)lastPix[1]) << 8);
-            int32_t b_err = ((int32_t)nextPix[2]) - (((int32_t)lastPix[2]) << 8);
+            int32_t r_err = lastFrame? ((int32_t)nextPix[0]) - (((int32_t)lastPix[0]) << 8) : 1000000;
+            int32_t g_err = lastFrame? ((int32_t)nextPix[1]) - (((int32_t)lastPix[1]) << 8) : 1000000;
+            int32_t b_err = lastFrame? ((int32_t)nextPix[2]) - (((int32_t)lastPix[2]) << 8) : 1000000;
             
             int32_t bestDiff = abs(r_err)+abs(g_err)+abs(b_err);
             int32_t bestInd = 1;
             
             for( uint32_t jj=0; jj<256; ++jj )
             {
-                int32_t r_ierr = ((int32_t)nextPix[0]) - (((int32_t)rPal[jj]) << 8);
-                int32_t g_ierr = ((int32_t)nextPix[1]) - (((int32_t)gPal[jj]) << 8);
-                int32_t b_ierr = ((int32_t)nextPix[2]) - (((int32_t)bPal[jj]) << 8);
+                int32_t r_ierr = ((int32_t)nextPix[0]) - (((int32_t)pal.r[jj]) << 8);
+                int32_t g_ierr = ((int32_t)nextPix[1]) - (((int32_t)pal.g[jj]) << 8);
+                int32_t b_ierr = ((int32_t)nextPix[2]) - (((int32_t)pal.b[jj]) << 8);
                 
                 int32_t diff = abs(r_ierr)+abs(g_ierr)+abs(b_ierr);
                 if( diff < bestDiff )
@@ -591,9 +485,9 @@ void DitherImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32
                 }
             }
             
-            nextPix[0] = rPal[bestInd];
-            nextPix[1] = gPal[bestInd];
-            nextPix[2] = bPal[bestInd];
+            nextPix[0] = pal.r[bestInd];
+            nextPix[1] = pal.g[bestInd];
+            nextPix[2] = pal.b[bestInd];
             
             if( lastFrame &&
                lastPix[0] == nextPix[0] &&
@@ -656,29 +550,56 @@ void DitherImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32
     free(quantPixels);
 }
 
-void WritePaletteResultsToImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32_t height, Palette& pal )
+void ThresholdImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32_t height, Palette& pal )
 {
     uint32_t numPixels = width*height;
     for( uint32_t ii=0; ii<numPixels; ++ii )
     {
-        uint8_t a = nextFrame[3];
+        int32_t bestDiff = 1000000;
+        int32_t bestInd = 0;
         
-        if( a )
-        {        
-            uint8_t r = nextFrame[0];
-            uint8_t g = nextFrame[1];
-            uint8_t b = nextFrame[2];
-            uint8_t p = Palettize(&r, &g, &b, pal);
-        
-            nextFrame[3] = p;
-            
-            lastFrame[0] = r;
-            lastFrame[1] = g;
-            lastFrame[2] = b;
-        }
-        else
+        if(lastFrame)
         {
-            nextFrame[3] = 1;
+            int32_t r_err = ((int32_t)lastFrame[0]) - ((int32_t)nextFrame[0]);
+            int32_t g_err = ((int32_t)lastFrame[1]) - ((int32_t)nextFrame[1]);
+            int32_t b_err = ((int32_t)lastFrame[2]) - ((int32_t)nextFrame[2]);
+            
+            bestDiff = abs(r_err)+abs(g_err)+abs(b_err);
+            bestInd = 1;
+            
+            lastFrame += 4;
+        }
+        
+        for( uint32_t jj=0; jj<256; ++jj )
+        {
+            int32_t r_err = ((int32_t)pal.r[jj]) - ((int32_t)nextFrame[0]);
+            int32_t g_err = ((int32_t)pal.g[jj]) - ((int32_t)nextFrame[1]);
+            int32_t b_err = ((int32_t)pal.b[jj]) - ((int32_t)nextFrame[2]);
+            
+            int32_t diff = abs(r_err)+abs(g_err)+abs(b_err);
+            if( diff < bestDiff )
+            {
+                bestDiff = diff;
+                bestInd = jj;
+            }
+        }
+        
+        nextFrame[3] = bestInd;
+        nextFrame += 4;
+    }
+}
+
+void CopyToLastFrame( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32_t height, Palette& pal )
+{
+    uint32_t numPixels = width*height;
+    for( uint32_t ii=0; ii<numPixels; ++ii )
+    {
+        int p = nextFrame[3];
+        if(p != 1)
+        {
+            lastFrame[0] = pal.r[p];
+            lastFrame[1] = pal.g[p];
+            lastFrame[2] = pal.b[p];
         }
         
         lastFrame += 4;
@@ -698,12 +619,12 @@ void BeginGif( GifWriter* writer, const char* filename, uint8_t* image, uint32_t
     writer->f = fopen(filename, "wb");
     ALWAYS_ASSERT(writer->f);
     writer->oldImage = (uint8_t*)malloc(width*height*4);
-    memcpy(writer->oldImage, image, width*height*4);
     
     MakePalette(image, width, height, &writer->pal);
     
-    //DitherImage(NULL, image, width, height, writer->pal);
-    WritePaletteResultsToImage(writer->oldImage, image, width, height, writer->pal);
+    DitherImage(NULL, image, width, height, writer->pal);
+    //ThresholdImage(NULL, image, width, height, writer->pal);
+    CopyToLastFrame(writer->oldImage, image, width, height, writer->pal);
     
     fputs("GIF89a", writer->f);
     
@@ -741,11 +662,11 @@ void BeginGif( GifWriter* writer, const char* filename, uint8_t* image, uint32_t
 
 void ContinueGif( GifWriter* writer, uint8_t* image, uint32_t width, uint32_t height, uint32_t delay )
 {
-    SetTransparency(writer->oldImage, image, width, height);
-    TransferPalette(&writer->pal, image, width, height);
+    MakePalette(image, width, height, &writer->pal);
     
     DitherImage(writer->oldImage, image, width, height, writer->pal);
-    //WritePaletteResultsToImage(writer->oldImage, image, width, height, writer->pal);
+    //ThresholdImage(writer->oldImage, image, width, height, writer->pal);
+    CopyToLastFrame(writer->oldImage, image, width, height, writer->pal);
     
     WriteLzwImage(writer->f, image, writer->oldImage, 0, 0, width, height, delay, writer->pal);
 }
