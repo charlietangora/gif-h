@@ -10,14 +10,71 @@
 #define gif_h
 
 #include <stdio.h>
+#include <string.h>
 #include <stdint.h>
+#include <stdlib.h>
+
+#include "types.h"
+
+const int kTransIndex = 0;
 
 struct Palette
 {
-    uint32_t r[256];
-    uint32_t g[256];
-    uint32_t b[256];
+    uint8_t r[256];
+    uint8_t g[256];
+    uint8_t b[256];
+    
+    uint8_t treeSplitElt[255];
+    uint8_t treeSplit[255];
 };
+
+void GetClosestPaletteColor(Palette* pPal, int r, int g, int b, int& bestInd, int& bestDiff, int treeRoot = 1)
+{
+    if(treeRoot > 255)
+    {
+        int ind = treeRoot-256;
+        if(ind == kTransIndex) return;
+        
+        int r_err = r - ((int32_t)pPal->r[ind]);
+        int g_err = g - ((int32_t)pPal->g[ind]);
+        int b_err = b - ((int32_t)pPal->b[ind]);
+        int diff = abs(r_err)+abs(g_err)+abs(b_err);
+        
+        if(diff < bestDiff)
+        {
+            bestInd = ind;
+            bestDiff = diff;
+        }
+        
+        return;
+    }
+    
+    int splitComp;
+    switch(pPal->treeSplitElt[treeRoot])
+    {
+        case 0: splitComp = r; break;
+        case 1: splitComp = g; break;
+        case 2: splitComp = b; break;
+    };
+    
+    uint32_t splitPos = pPal->treeSplit[treeRoot];
+    if(splitPos > splitComp)
+    {
+        GetClosestPaletteColor(pPal, r, g, b, bestInd, bestDiff, treeRoot*2);
+        if( bestDiff > splitPos - splitComp )
+        {
+            GetClosestPaletteColor(pPal, r, g, b, bestInd, bestDiff, treeRoot*2+1);
+        }
+    }
+    else
+    {
+        GetClosestPaletteColor(pPal, r, g, b, bestInd, bestDiff, treeRoot*2+1);
+        if( bestDiff > splitComp - splitPos )
+        {
+            GetClosestPaletteColor(pPal, r, g, b, bestInd, bestDiff, treeRoot*2);
+        }
+    }
+}
 
 void SwapPixels(uint8_t* image, int pixA, int pixB)
 {
@@ -71,25 +128,28 @@ int Partition(uint8_t* image, const int left, const int right, const int elt, in
 }
 
 // Perform an incomplete sort, finding all elements above and below the desired median
-void PartitionByMedian(uint8_t* image, int left, int right, int elt, int neededCenter)
+void PartitionByMedian(uint8_t* image, int left, int right, int com, int neededCenter)
 {
     if(left < right-1)
     {
         int pivotIndex = left + (right-left)/2;
     
-        pivotIndex = Partition(image, left, right, elt, pivotIndex);
+        pivotIndex = Partition(image, left, right, com, pivotIndex);
         
         if(pivotIndex > neededCenter)
-            PartitionByMedian(image, left, pivotIndex, elt, neededCenter);
+            PartitionByMedian(image, left, pivotIndex, com, neededCenter);
         
         if(pivotIndex < neededCenter)
-            PartitionByMedian(image, pivotIndex+1, right, elt, neededCenter);
+            PartitionByMedian(image, pivotIndex+1, right, com, neededCenter);
     }
 }
 
-void SplitPalette(uint8_t* image, int numPixels, int firstElt, int numElts, Palette* pal)
+void SplitPalette(uint8_t* image, int numPixels, int firstElt, int lastElt, int splitElt, int splitDist, int treeNode, Palette* pal)
 {
-    if(numElts == 1)
+    if(lastElt <= firstElt)
+        return;
+    
+    if(lastElt == firstElt+1)
     {
         int r=0, g=0, b=0;
         for(int ii=0; ii<numPixels; ++ii)
@@ -137,67 +197,37 @@ void SplitPalette(uint8_t* image, int numPixels, int firstElt, int numElts, Pale
     int gRange = maxG - minG;
     int bRange = maxB - minB;
     
-    int splitElt = 1;
-    if(bRange > gRange) splitElt = 2;
-    if(rRange > bRange && rRange > gRange) splitElt = 0;
+    int splitCom = 1;
+    if(bRange > gRange) splitCom = 2;
+    if(rRange > bRange && rRange > gRange) splitCom = 0;
     
-    int subEltsA = numElts/2;
-    int subEltsB = numElts-subEltsA;
-    
-    int subPixelsA = numPixels * subEltsA / numElts;
+    int subPixelsA = numPixels * (splitElt - firstElt) / (lastElt - firstElt);
     int subPixelsB = numPixels-subPixelsA;
     
-    PartitionByMedian(image, 0, numPixels, splitElt, subPixelsA);
+    PartitionByMedian(image, 0, numPixels, splitCom, subPixelsA);
     
-    SplitPalette(image,              subPixelsA, firstElt,          subEltsA, pal);
-    SplitPalette(image+subPixelsA*4, subPixelsB, firstElt+subEltsA, subEltsB, pal);
+    pal->treeSplitElt[treeNode] = splitCom;
+    pal->treeSplit[treeNode] = image[subPixelsA*4+splitCom];
+    
+    SplitPalette(image,              subPixelsA, firstElt, splitElt, splitElt-splitDist, splitDist/2, treeNode*2,   pal);
+    SplitPalette(image+subPixelsA*4, subPixelsB, splitElt, lastElt,  splitElt+splitDist, splitDist/2, treeNode*2+1, pal);
 }
 
 void MakePalette( uint8_t* image, uint32_t width, uint32_t height, Palette* pPal )
 {
-    pPal->r[0] = pPal->g[0] = pPal->b[0] = 0;
-    pPal->r[1] = pPal->g[1] = pPal->b[1] = 0;
-    
-    pPal->r[255] = pPal->g[255] = pPal->b[255] = 255;
-    pPal->r[254] = pPal->g[254] = pPal->b[254] = 0;
-    pPal->r[253] = pPal->g[253] = pPal->b[253] = 0;
-    pPal->r[252] = pPal->g[252] = pPal->b[252] = 0;
-    
-    for(int ii=0; ii<width*height; ++ii)
-    {
-        int r = image[ii*4+0];
-        int g = image[ii*4+1];
-        int b = image[ii*4+2];
-        
-        if( r > pPal->r[254] || (r == pPal->r[254] && (g > pPal->g[254] || b > pPal->b[254])) )
-        {
-            pPal->r[254] = r;
-            pPal->g[254] = g;
-            pPal->b[254] = b;
-        }
-        
-        if( g > pPal->g[253] || (g == pPal->g[253] && (r > pPal->r[253] || b > pPal->b[253])) )
-        {
-            pPal->r[253] = r;
-            pPal->g[253] = g;
-            pPal->b[253] = b;
-        }
-        
-        if( b > pPal->b[252] || (b == pPal->b[252] && (r > pPal->r[252] || b > pPal->b[252])) )
-        {
-            pPal->r[252] = r;
-            pPal->g[252] = g;
-            pPal->b[252] = b;
-        }
-    }
-    
     int imageSize = width*height*4*sizeof(uint8_t);
     uint8_t* destroyableImage = (uint8_t*)malloc(imageSize);
     memcpy(destroyableImage, image, imageSize);
     
-    SplitPalette(destroyableImage, width*height, 2, 250, pPal);
+    SplitPalette(destroyableImage, width*height, 1, 256, 128, 64, 1, pPal);
     
     free(destroyableImage);
+    
+    // node for the transparency index
+    pPal->treeSplit[128] = 0;
+    pPal->treeSplitElt[128] = 0;
+    
+    pPal->r[0] = pPal->g[0] = pPal->b[0] = 0;
 }
 
 struct BitStatus
@@ -226,9 +256,6 @@ void WriteBit( BitStatus& stat, uint32_t bit )
 
 void WriteImageChunk( FILE* f, BitStatus& stat )
 {
-    ASSERT(stat.bitIndex == 0);
-    ASSERT(stat.chunkIndex < 256);
-    
     fputc(stat.chunkIndex, f);
     fwrite(stat.chunk, 1, stat.chunkIndex, f);
     
@@ -282,15 +309,11 @@ void DeleteLzwTree( lzwNode* node )
 
 void WritePalette( const Palette* pPal, FILE* f )
 {
-    fputc(0, f);  // first and second colors: always black
+    fputc(0, f);  // first color: transparency
     fputc(0, f);
     fputc(0, f);
     
-    fputc(0, f);
-    fputc(0, f);
-    fputc(0, f);
-    
-    for(uint32_t ii=2; ii<255; ++ii)
+    for(uint32_t ii=1; ii<256; ++ii)
     {
         uint32_t r = pPal->r[ii];
         uint32_t g = pPal->g[ii];
@@ -300,10 +323,6 @@ void WritePalette( const Palette* pPal, FILE* f )
         fputc(g, f);
         fputc(b, f);
     }
-    
-    fputc(255, f);  // last color: always white
-    fputc(255, f);
-    fputc(255, f);
 }
 
 void WriteLzwImage(FILE* f, uint8_t* image, uint8_t* oldImage, uint32_t left, uint32_t top,  uint32_t width, uint32_t height, uint32_t delay, Palette& pal)
@@ -315,7 +334,7 @@ void WriteLzwImage(FILE* f, uint8_t* image, uint8_t* oldImage, uint32_t left, ui
     fputc(0x05, f); // dispose by leaving in place, has transparency
     fputc(delay & 0xff, f);
     fputc((delay >> 8) & 0xff, f);
-    fputc(0x01, f); // transparent color index 1
+    fputc(kTransIndex, f); // transparent color index
     fputc(0, f);
     
     fputc(0x2c, f); // image descriptor block
@@ -380,7 +399,6 @@ void WriteLzwImage(FILE* f, uint8_t* image, uint8_t* oldImage, uint32_t left, ui
                 }
                 if( maxCode == 4095 )
                 {
-                    ASSERT(codeSize == 12);
                     WriteCode(f, stat, 256, codeSize); // clear tree
                     
                     DeleteLzwTree(codetree);
@@ -404,26 +422,9 @@ void WriteLzwImage(FILE* f, uint8_t* image, uint8_t* oldImage, uint32_t left, ui
     fputc(0, f); // image block terminator
 }
 
-void SetTransparency( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32_t height )
+int imax(int l, int r)
 {
-    uint32_t numPixels = width*height;
-    for( uint32_t ii=0; ii<numPixels; ++ii )
-    {
-        if( lastFrame[0] == nextFrame[0] &&
-            lastFrame[1] == nextFrame[1] &&
-            lastFrame[2] == nextFrame[2] )
-        {
-            // nextFrame[0] = nextFrame[1] = nextFrame[2] = nextFrame[3] = 0;
-            nextFrame[3] = 0;
-        }
-        else
-        {
-            nextFrame[3] = 255;
-        }
-        
-        lastFrame += 4;
-        nextFrame += 4;
-    }
+    return l>r?l:r;
 }
 
 void DitherImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32_t height, Palette& pal )
@@ -445,9 +446,9 @@ void DitherImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32
             int32_t* nextPix = quantPixels + 4*(yy*width+xx);
             uint8_t* lastPix = lastFrame? lastFrame + 4*(yy*width+xx) : NULL;
             
-            uint8_t rr = nextPix[0] >> 8;
-            uint8_t gg = nextPix[1] >> 8;
-            uint8_t bb = nextPix[2] >> 8;
+            int32_t rr = ((int32_t)nextPix[0] + 128) >> 8;
+            int32_t gg = ((int32_t)nextPix[1] + 128) >> 8;
+            int32_t bb = ((int32_t)nextPix[2] + 128) >> 8;
             
             if( lastFrame &&
                 lastPix[0] == rr &&
@@ -457,7 +458,7 @@ void DitherImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32
                 nextPix[0] = rr;
                 nextPix[1] = gg;
                 nextPix[2] = bb;
-                nextPix[3] = 1;
+                nextPix[3] = kTransIndex;
                 continue;
             }
             
@@ -466,35 +467,27 @@ void DitherImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32
             int32_t b_err = lastFrame? ((int32_t)nextPix[2]) - (((int32_t)lastPix[2]) << 8) : 1000000;
             
             int32_t bestDiff = abs(r_err)+abs(g_err)+abs(b_err);
-            int32_t bestInd = 1;
+            int32_t bestInd = kTransIndex;
             
-            for( uint32_t jj=0; jj<256; ++jj )
+            GetClosestPaletteColor(&pal, rr, gg, bb, bestInd, bestDiff);
+            
+            if(bestInd != kTransIndex)
             {
-                int32_t r_ierr = ((int32_t)nextPix[0]) - (((int32_t)pal.r[jj]) << 8);
-                int32_t g_ierr = ((int32_t)nextPix[1]) - (((int32_t)pal.g[jj]) << 8);
-                int32_t b_ierr = ((int32_t)nextPix[2]) - (((int32_t)pal.b[jj]) << 8);
+                r_err = ((int32_t)nextPix[0]) - (((int32_t)pal.r[bestInd]) << 8);
+                g_err = ((int32_t)nextPix[1]) - (((int32_t)pal.g[bestInd]) << 8);
+                b_err = ((int32_t)nextPix[2]) - (((int32_t)pal.b[bestInd]) << 8);
                 
-                int32_t diff = abs(r_ierr)+abs(g_ierr)+abs(b_ierr);
-                if( diff < bestDiff )
-                {
-                    bestDiff = diff;
-                    bestInd = jj;
-                    r_err = r_ierr;
-                    g_err = g_ierr;
-                    b_err = b_ierr;
-                }
+                nextPix[0] = pal.r[bestInd];
+                nextPix[1] = pal.g[bestInd];
+                nextPix[2] = pal.b[bestInd];
             }
-            
-            nextPix[0] = pal.r[bestInd];
-            nextPix[1] = pal.g[bestInd];
-            nextPix[2] = pal.b[bestInd];
             
             if( lastFrame &&
                lastPix[0] == nextPix[0] &&
                lastPix[1] == nextPix[1] &&
                lastPix[2] == nextPix[2] )
             {
-                nextPix[3] = 1;
+                nextPix[3] = kTransIndex;
             }
             else
             {
@@ -509,33 +502,33 @@ void DitherImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uint32
             if(quantloc_7 < numPixels)
             {
                 int32_t* pix7 = quantPixels+4*quantloc_7;
-                pix7[0] += r_err * 7 / 16;
-                pix7[1] += g_err * 7 / 16;
-                pix7[2] += b_err * 7 / 16;
+                pix7[0] += imax( -pix7[0], r_err * 7 / 16 );
+                pix7[1] += imax( -pix7[1], g_err * 7 / 16 );
+                pix7[2] += imax( -pix7[2], b_err * 7 / 16 );
             }
             
             if(quantloc_3 < numPixels)
             {
                 int32_t* pix3 = quantPixels+4*quantloc_3;
-                pix3[0] += r_err * 3 / 16;
-                pix3[1] += g_err * 3 / 16;
-                pix3[2] += b_err * 3 / 16;
+                pix3[0] += imax( -pix3[0], r_err * 3 / 16 );
+                pix3[1] += imax( -pix3[1], g_err * 3 / 16 );
+                pix3[2] += imax( -pix3[2], b_err * 3 / 16 );
             }
             
             if(quantloc_5 < numPixels)
             {
                 int32_t* pix5 = quantPixels+4*quantloc_5;
-                pix5[0] += r_err * 5 / 16;
-                pix5[1] += g_err * 5 / 16;
-                pix5[2] += b_err * 5 / 16;
+                pix5[0] += imax( -pix5[0], r_err * 5 / 16 );
+                pix5[1] += imax( -pix5[1], g_err * 5 / 16 );
+                pix5[2] += imax( -pix5[2], b_err * 5 / 16 );
             }
             
             if(quantloc_1 < numPixels)
             {
                 int32_t* pix1 = quantPixels+4*quantloc_1;
-                pix1[0] += r_err / 16;
-                pix1[1] += g_err / 16;
-                pix1[2] += b_err / 16;
+                pix1[0] += imax( -pix1[0], r_err / 16 );
+                pix1[1] += imax( -pix1[1], g_err / 16 );
+                pix1[2] += imax( -pix1[2], b_err / 16 );
             }
         }
     }
@@ -556,7 +549,7 @@ void ThresholdImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uin
     for( uint32_t ii=0; ii<numPixels; ++ii )
     {
         int32_t bestDiff = 1000000;
-        int32_t bestInd = 0;
+        int32_t bestInd = 1;
         
         if(lastFrame)
         {
@@ -565,24 +558,14 @@ void ThresholdImage( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, uin
             int32_t b_err = ((int32_t)lastFrame[2]) - ((int32_t)nextFrame[2]);
             
             bestDiff = abs(r_err)+abs(g_err)+abs(b_err);
-            bestInd = 1;
+            bestInd = kTransIndex;
             
             lastFrame += 4;
         }
         
-        for( uint32_t jj=0; jj<256; ++jj )
-        {
-            int32_t r_err = ((int32_t)pal.r[jj]) - ((int32_t)nextFrame[0]);
-            int32_t g_err = ((int32_t)pal.g[jj]) - ((int32_t)nextFrame[1]);
-            int32_t b_err = ((int32_t)pal.b[jj]) - ((int32_t)nextFrame[2]);
-            
-            int32_t diff = abs(r_err)+abs(g_err)+abs(b_err);
-            if( diff < bestDiff )
-            {
-                bestDiff = diff;
-                bestInd = jj;
-            }
-        }
+        
+        GetClosestPaletteColor(&pal, nextFrame[0], nextFrame[1], nextFrame[2], bestInd, bestDiff);
+        ALWAYS_ASSERT(lastFrame || bestInd != kTransIndex);
         
         nextFrame[3] = bestInd;
         nextFrame += 4;
@@ -595,7 +578,7 @@ void CopyToLastFrame( uint8_t* lastFrame, uint8_t* nextFrame, uint32_t width, ui
     for( uint32_t ii=0; ii<numPixels; ++ii )
     {
         int p = nextFrame[3];
-        if(p != 1)
+        if(p != kTransIndex)
         {
             lastFrame[0] = pal.r[p];
             lastFrame[1] = pal.g[p];
@@ -617,7 +600,8 @@ struct GifWriter
 void BeginGif( GifWriter* writer, const char* filename, uint8_t* image, uint32_t width, uint32_t height, uint32_t delay )
 {
     writer->f = fopen(filename, "wb");
-    ALWAYS_ASSERT(writer->f);
+    if(!writer->f) return;
+    
     writer->oldImage = (uint8_t*)malloc(width*height*4);
     
     MakePalette(image, width, height, &writer->pal);
@@ -662,6 +646,8 @@ void BeginGif( GifWriter* writer, const char* filename, uint8_t* image, uint32_t
 
 void ContinueGif( GifWriter* writer, uint8_t* image, uint32_t width, uint32_t height, uint32_t delay )
 {
+    if(!writer->f) return;
+    
     MakePalette(image, width, height, &writer->pal);
     
     DitherImage(writer->oldImage, image, width, height, writer->pal);
