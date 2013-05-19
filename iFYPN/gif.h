@@ -280,31 +280,12 @@ void WriteCode( FILE* f, BitStatus& stat, uint32_t code, uint32_t length )
 
 struct lzwNode
 {
-    uint32_t m_code;
-    lzwNode* m_children[256];
+    uint16_t m_next[256];
 };
 
-lzwNode* InitLzwTree()
+void InitLzwTree(lzwNode* scratch)
 {
-    lzwNode* root = (lzwNode*)malloc(sizeof(lzwNode));
-    for(int ii=0; ii<256; ++ii)
-    {
-        lzwNode* child = (lzwNode*)malloc(sizeof(lzwNode));
-        bzero(child, sizeof(lzwNode));
-        child->m_code = ii;
-        root->m_children[ii] = child;
-    }
-    return root;
-}
-
-void GifDeleteLzwTree( lzwNode* node )
-{
-    if( !node ) return;
-    
-    for( uint32_t ii=0; ii<256; ++ii )
-        GifDeleteLzwTree(node->m_children[ii]);
-    
-    free(node);
+    bzero(scratch, sizeof(lzwNode)*4096);
 }
 
 void GifWritePalette( const GifPalette* pPal, FILE* f )
@@ -357,8 +338,10 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint8_t* oldImage, uint32_t left,
     
     fputc(8, f); // min code size 8 bits
     
-    lzwNode* codetree = InitLzwTree();
-    lzwNode* curNode = codetree;
+    lzwNode* codetree = (lzwNode*)malloc(sizeof(lzwNode)*4096);
+    
+    InitLzwTree(codetree);
+    int32_t curCode = -1;
     uint32_t codeSize = 9;
     uint32_t maxCode = 257;
     
@@ -379,19 +362,19 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint8_t* oldImage, uint32_t left,
             //WriteCode( f, stat, nextValue, codeSize );
             //WriteCode( f, stat, 256, codeSize );
             
-            if( curNode->m_children[nextValue] )
+            if( curCode < 0 )
             {
-                curNode = curNode->m_children[nextValue];
+                curCode = nextValue;
+            }
+            else if( codetree[curCode].m_next[nextValue] )
+            {
+                curCode = codetree[curCode].m_next[nextValue];
             }
             else
             {
-                WriteCode( f, stat, curNode->m_code, codeSize );
+                WriteCode( f, stat, curCode, codeSize );
                 
-                lzwNode* child = (lzwNode*)malloc(sizeof(lzwNode));
-                bzero(child, sizeof(lzwNode));
-                maxCode++;
-                child->m_code = maxCode;
-                curNode->m_children[nextValue] = child;
+                codetree[curCode].m_next[nextValue] = ++maxCode;
                 
                 if( maxCode >= (1 << codeSize) )
                 {
@@ -401,25 +384,25 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint8_t* oldImage, uint32_t left,
                 {
                     WriteCode(f, stat, 256, codeSize); // clear tree
                     
-                    GifDeleteLzwTree(codetree);
-                    codetree = InitLzwTree();
-                    curNode = codetree;
+                    InitLzwTree(codetree);
+                    curCode = -1;
                     codeSize = 9;
                     maxCode = 257;
                 }
                 
-                curNode = codetree->m_children[nextValue];
+                curCode = nextValue;
             }
         }
     }
     
-    WriteCode( f, stat, curNode->m_code, codeSize );
+    WriteCode( f, stat, curCode, codeSize );
     WriteCode( f, stat, 256, codeSize );
     WriteCode( f, stat, 257, 9 );
     while( stat.bitIndex ) WriteBit(stat, 0);
     if( stat.chunkIndex ) WriteImageChunk(f, stat);
-    GifDeleteLzwTree(codetree);
     fputc(0, f); // image block terminator
+    
+    free(codetree);
 }
 
 int GifIMax(int l, int r)
