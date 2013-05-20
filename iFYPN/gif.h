@@ -28,6 +28,8 @@ struct GifPalette
     uint8_t treeSplit[255];
 };
 
+// walks the k-d tree to pick the palette entry for a desired color.
+// this is the major hotspot in the code at the moment.
 void GifGetClosestPaletteColor(GifPalette* pPal, int r, int g, int b, int& bestInd, int& bestDiff, int treeRoot = 1)
 {
     if(treeRoot > 255)
