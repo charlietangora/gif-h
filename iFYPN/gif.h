@@ -9,8 +9,8 @@
 // Input images must be RGBA8 formatted.
 //
 // USAGE:
-// Create a GifWriter struct. Pass it to GifBegin() with the first frame.
-// Pass subsequent frames to GifContinue().
+// Create a GifWriter struct. Pass it to GifBegin() to initialize and write the header.
+// Pass subsequent frames to GifWriteFrame().
 // Finally, call GifEnd() to close the file handle and free memory.
 //
 
@@ -697,26 +697,21 @@ struct GifWriter
 {
     FILE* f;
     uint8_t* oldImage;
+    bool firstFrame;
 };
 
-// Creates a gif file, writes out the first frame.
+// Creates a gif file.
 // The input GIFWriter is assumed to be uninitialized.
 // The delay value is the time between frames in hundredths of a second - note that not all viewers pay much attention to this value.
-bool GifBegin( GifWriter* writer, const char* filename, const uint8_t* image, uint32_t width, uint32_t height, uint32_t delay, int32_t bitDepth = 8, bool dither = false )
+bool GifBegin( GifWriter* writer, const char* filename, uint32_t width, uint32_t height, uint32_t delay, int32_t bitDepth = 8, bool dither = false )
 {
     writer->f = fopen(filename, "wb");
     if(!writer->f) return false;
     
+    writer->firstFrame = true;
+    
     // allocate 
     writer->oldImage = (uint8_t*)GIF_MALLOC(width*height*4);
-    
-    GifPalette pal;
-    GifMakePalette(NULL, image, width, height, bitDepth, dither, &pal);
-    
-    if(dither)
-        GifDitherImage(NULL, image, writer->oldImage, width, height, &pal);
-    else
-        GifThresholdImage(NULL, image, writer->oldImage, width, height, &pal);
     
     fputs("GIF89a", writer->f);
     
@@ -756,8 +751,6 @@ bool GifBegin( GifWriter* writer, const char* filename, const uint8_t* image, ui
         fputc(0, writer->f); // block terminator
     }
     
-    GifWriteLzwImage(writer->f, writer->oldImage, 0, 0, width, height, delay, &pal);
-    
     return true;
 }
 
@@ -765,17 +758,20 @@ bool GifBegin( GifWriter* writer, const char* filename, const uint8_t* image, ui
 // The GIFWriter should have been created by GIFBegin.
 // AFAIK, it is legal to use different bit depths for different frames of an image -
 // this may be handy to save bits in animations that don't change much.
-bool GifContinue( GifWriter* writer, const uint8_t* image, uint32_t width, uint32_t height, uint32_t delay, int bitDepth = 8, bool dither = false )
+bool GifWriteFrame( GifWriter* writer, const uint8_t* image, uint32_t width, uint32_t height, uint32_t delay, int bitDepth = 8, bool dither = false )
 {
     if(!writer->f) return false;
     
+    const uint8_t* oldImage = writer->firstFrame? NULL : writer->oldImage;
+    writer->firstFrame = false;
+    
     GifPalette pal;
-    GifMakePalette((dither? NULL : writer->oldImage), image, width, height, bitDepth, dither, &pal);
+    GifMakePalette((dither? NULL : oldImage), image, width, height, bitDepth, dither, &pal);
     
     if(dither)
-        GifDitherImage(writer->oldImage, image, writer->oldImage, width, height, &pal);
+        GifDitherImage(oldImage, image, writer->oldImage, width, height, &pal);
     else
-        GifThresholdImage(writer->oldImage, image, writer->oldImage, width, height, &pal);
+        GifThresholdImage(oldImage, image, writer->oldImage, width, height, &pal);
     
     GifWriteLzwImage(writer->f, writer->oldImage, 0, 0, width, height, delay, &pal);
     
