@@ -1,12 +1,13 @@
 //
 // gif.h
 // by Charlie Tangora
+// Public domain.
 //
 // This file offers a simple, very limited way to create animated GIFs directly in code.
 // There's not much effort to optimize colors to improve compression, so resulting files
 // are often quite large. But it's still handy to be able to spit out GIFs on command.
 //
-// Input images must be RGBA8 formatted.
+// Only RGBA8 is currently supported as an input format; the alpha is ignored.
 //
 // USAGE:
 // Create a GifWriter struct. Pass it to GifBegin() to initialize and write the header.
@@ -21,17 +22,31 @@
 #include <string.h>  // for memcpy and bzero
 #include <stdint.h>  // for integer typedefs
 
-// Use these macros to hook into a custom memory allocator.
+// Define these macros to hook into a custom memory allocator.
 // TEMP_MALLOC and TEMP_FREE will only be called in stack fashion - frees in the reverse order of mallocs
 // and any temp memory allocated by a function will be freed before it exits.
-// MALLOC and FREE are used only by GifBegin and GifEnd (to allocate a buffer the size of the image, which
+// MALLOC and FREE are used only by GifBegin and GifEnd respectively (to allocate a buffer the size of the image, which
 // is used to find changed pixels for delta-encoding.)
 
+#ifndef GIF_TEMP_MALLOC
 #include <stdlib.h>
 #define GIF_TEMP_MALLOC malloc
+#endif
+
+#ifndef GIF_TEMP_FREE
+#include <stdlib.h>
 #define GIF_TEMP_FREE free
+#endif
+
+#ifndef GIF_MALLOC
+#include <stdlib.h>
 #define GIF_MALLOC malloc
+#endif
+
+#ifndef GIF_FREE
+#include <stdlib.h>
 #define GIF_FREE free
+#endif
 
 const int kGifTransIndex = 0;
 
