@@ -10,6 +10,8 @@ So resulting files are often quite large. The hope is that it will be handy none
 
 Only RGBA8 is currently supported as an input format. (The alpha is ignored.) 
 
+Email me : ctangora -at- gmail -dot- com
+
 Usage:
 -------------------
 Create a GifWriter struct. 
