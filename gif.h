@@ -639,7 +639,7 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uin
     
     GifLzwNode* codetree = (GifLzwNode*)GIF_TEMP_MALLOC(sizeof(GifLzwNode)*4096);
     
-    bzero(codetree, sizeof(GifLzwNode)*4096);
+    memset(codetree, 0, sizeof(GifLzwNode)*4096);
     int32_t curCode = -1;
     uint32_t codeSize = minCodeSize+1;
     uint32_t maxCode = clearCode+1;
@@ -690,7 +690,7 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uin
                     // the dictionary is full, clear it out and begin anew
                     GifWriteCode(f, stat, clearCode, codeSize); // clear tree
                     
-                    bzero(codetree, sizeof(GifLzwNode)*4096);
+                    memset(codetree, 0, sizeof(GifLzwNode)*4096);
                     curCode = -1;
                     codeSize = minCodeSize+1;
                     maxCode = clearCode+1;
