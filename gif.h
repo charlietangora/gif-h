@@ -727,7 +727,12 @@ struct GifWriter
 // The delay value is the time between frames in hundredths of a second - note that not all viewers pay much attention to this value.
 bool GifBegin( GifWriter* writer, const char* filename, uint32_t width, uint32_t height, uint32_t delay, int32_t bitDepth = 8, bool dither = false )
 {
+#if _MSC_VER >= 1400
+	writer->f = 0;
+    fopen_s(&writer->f, filename, "wb");
+#else
     writer->f = fopen(filename, "wb");
+#endif
     if(!writer->f) return false;
     
     writer->firstFrame = true;
