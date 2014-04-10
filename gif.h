@@ -108,7 +108,7 @@ void GifGetClosestPaletteColor(GifPalette* pPal, int r, int g, int b, int& bestI
     int comps[3]; comps[0] = r; comps[1] = g; comps[2] = b;
     int splitComp = comps[pPal->treeSplitElt[treeRoot]];
     
-    uint32_t splitPos = pPal->treeSplit[treeRoot];
+    int splitPos = pPal->treeSplit[treeRoot];
     if(splitPos > splitComp)
     {
         // check the left subtree
@@ -377,14 +377,14 @@ void GifMakePalette( const uint8_t* lastFrame, const uint8_t* nextFrame, uint32_
 // Implements Floyd-Steinberg dithering, writes palette value to alpha
 void GifDitherImage( const uint8_t* lastFrame, const uint8_t* nextFrame, uint8_t* outFrame, uint32_t width, uint32_t height, GifPalette* pPal )
 {
-    uint32_t numPixels = width*height;
+    int numPixels = width*height;
     
     // quantPixels initially holds color*256 for all pixels
     // The extra 8 bits of precision allow for sub-single-color error values
     // to be propagated
     int32_t* quantPixels = (int32_t*)GIF_TEMP_MALLOC(sizeof(int32_t)*numPixels*4);
     
-    for( uint32_t ii=0; ii<numPixels*4; ++ii )
+    for( int ii=0; ii<numPixels*4; ++ii )
     {
         uint8_t pix = nextFrame[ii];
         int32_t pix16 = int32_t(pix) * 256;
@@ -475,7 +475,7 @@ void GifDitherImage( const uint8_t* lastFrame, const uint8_t* nextFrame, uint8_t
     }
     
     // Copy the palettized result to the output buffer
-    for( uint32_t ii=0; ii<numPixels*4; ++ii )
+    for( int ii=0; ii<numPixels*4; ++ii )
     {
         outFrame[ii] = quantPixels[ii];
     }
@@ -589,7 +589,7 @@ void GifWritePalette( const GifPalette* pPal, FILE* f )
     fputc(0, f);
     fputc(0, f);
     
-    for(uint32_t ii=1; ii<(1 << pPal->bitDepth); ++ii)
+    for(int ii=1; ii<(1 << pPal->bitDepth); ++ii)
     {
         uint32_t r = pPal->r[ii];
         uint32_t g = pPal->g[ii];
@@ -651,9 +651,9 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uin
     
     GifWriteCode(f, stat, clearCode, codeSize);  // start with a fresh LZW dictionary
     
-    for(int32_t yy=0; yy<height; ++yy)
+    for(uint32_t yy=0; yy<height; ++yy)
     {
-        for(int32_t xx=0; xx<width; ++xx)
+        for(uint32_t xx=0; xx<width; ++xx)
         {
             uint8_t nextValue = image[(yy*width+xx)*4+3];
             
@@ -679,7 +679,7 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uin
                 // insert the new run into the dictionary
                 codetree[curCode].m_next[nextValue] = ++maxCode;
                 
-                if( maxCode >= (1 << codeSize) )
+                if( maxCode >= (1ul << codeSize) )
                 {
                     // dictionary entry count has broken a size barrier,
                     // we need more bits for codes
