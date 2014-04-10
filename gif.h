@@ -267,9 +267,9 @@ void GifSplitPalette(uint8_t* image, int numPixels, int firstElt, int lastElt, i
         g /= numPixels;
         b /= numPixels;
         
-        pal->r[firstElt] = r;
-        pal->g[firstElt] = g;
-        pal->b[firstElt] = b;
+        pal->r[firstElt] = (uint8_t)r;
+        pal->g[firstElt] = (uint8_t)g;
+        pal->b[firstElt] = (uint8_t)b;
         
         return;
     }
