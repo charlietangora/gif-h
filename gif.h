@@ -68,8 +68,8 @@ struct GifPalette
     // k-d tree over RGB space, organized in heap fashion
     // i.e. left child of node i is node i*2, right child is node i*2+1
     // nodes 256-511 are implicitly the leaves, containing a color
-    uint8_t treeSplitElt[255];
-    uint8_t treeSplit[255];
+    uint8_t treeSplitElt[256];
+    uint8_t treeSplit[256];
 };
 
 // max, min, and abs functions
@@ -101,6 +101,12 @@ void GifGetClosestPaletteColor(GifPalette* pPal, int r, int g, int b, int& bestI
             bestDiff = diff;
         }
 
+        return;
+    }
+
+    // ignore unused nodes
+    if(pPal->treeSplitElt[treeRoot] >= 3)
+    {
         return;
     }
 
@@ -139,7 +145,7 @@ void GifSwapPixels(uint8_t* image, int pixA, int pixB)
     uint8_t rB = image[pixB*4];
     uint8_t gB = image[pixB*4+1];
     uint8_t bB = image[pixB*4+2];
-    uint8_t aB = image[pixA*4+3];
+    uint8_t aB = image[pixB*4+3];
 
     image[pixA*4] = rB;
     image[pixA*4+1] = gB;
@@ -691,7 +697,7 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uin
                     GifWriteCode(f, stat, clearCode, codeSize); // clear tree
 
                     memset(codetree, 0, sizeof(GifLzwNode)*4096);
-                    curCode = -1;
+                    nextValue = -1;
                     codeSize = minCodeSize+1;
                     maxCode = clearCode+1;
                 }
@@ -793,6 +799,8 @@ bool GifWriteFrame( GifWriter* writer, const uint8_t* image, uint32_t width, uin
     writer->firstFrame = false;
 
     GifPalette pal;
+    // mark all nodes unused
+    memset(pal.treeSplitElt, 3, 256);
     GifMakePalette((dither? NULL : oldImage), image, width, height, bitDepth, dither, &pal);
 
     if(dither)
