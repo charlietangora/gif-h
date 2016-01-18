@@ -158,51 +158,74 @@ void GifSwapPixels(uint8_t* image, int pixA, int pixB)
     image[pixB*4+3] = aA;
 }
 
-// just the partition operation from quicksort
-int GifPartition(uint8_t* image, const int left, const int right, const int elt, int pivotIndex)
+// just the partition operation from quicksort 3-way
+void GifPartition(uint8_t* image, int com, int &left, int &right)
 {
-    const int pivotValue = image[(pivotIndex)*4+elt];
-    GifSwapPixels(image, pivotIndex, right-1);
-    int storeIndex = left;
-    bool split = 0;
-    for(int ii=left; ii<right-1; ++ii)
+    GifSwapPixels(image, left, left + (right - left) / 2);
+    uint8_t comPivot = image[left*4+com];
+    uint8_t rPivot = image[left*4];
+    uint8_t gPivot = image[left*4+1];
+    uint8_t bPivot = image[left*4+2];
+    bool split = false;
+    for(int i1=left; i1<right; ++i1)
     {
-        int arrayVal = image[ii*4+elt];
-        if( arrayVal < pivotValue )
+        uint8_t comArray = image[i1*4+com];
+        if( comArray < comPivot )
         {
-            GifSwapPixels(image, ii, storeIndex);
-            ++storeIndex;
+            GifSwapPixels(image, i1, left);
+            ++left;
         }
-        else if( arrayVal == pivotValue )
+        else if( comArray > comPivot )
         {
-            if(split)
+            --right;
+            GifSwapPixels(image, i1, right);
+            --i1;
+        }
+        else
+        {
+            uint8_t rArray = image[i1*4];
+            uint8_t gArray = image[i1*4+1];
+            uint8_t bArray = image[i1*4+2];
+            if( rArray != rPivot ||
+                gArray != gPivot ||
+                bArray != bPivot )
             {
-                GifSwapPixels(image, ii, storeIndex);
-                ++storeIndex;
+                if(split)
+                {
+                    GifSwapPixels(image, i1, left);
+                    ++left;
+                }
+                else
+                {
+                    --right;
+                    GifSwapPixels(image, i1, right);
+                    --i1;
+                }
+                split = !split;
             }
-            split = !split;
         }
     }
-    GifSwapPixels(image, storeIndex, right-1);
-    return storeIndex;
 }
 
 // Perform an incomplete sort, finding all elements above and below the desired median
-void GifPartitionByMedian(uint8_t* image, int left, int right, int com, int neededCenter)
+int GifPartitionByMedian(uint8_t* image, int com, int left, int right, int neededCenter)
 {
-    if(left < right-1)
+    while(left < right-1)
     {
-        int pivotIndex = left + (right-left)/2;
+        int centerLeft = left;
+        int centerRight = right;
+        GifPartition(image, com, centerLeft, centerRight);
 
-        pivotIndex = GifPartition(image, left, right, com, pivotIndex);
-
-        // Only "sort" the section of the array that contains the median
-        if(pivotIndex > neededCenter)
-            GifPartitionByMedian(image, left, pivotIndex, com, neededCenter);
-
-        if(pivotIndex < neededCenter)
-            GifPartitionByMedian(image, pivotIndex+1, right, com, neededCenter);
+        if( neededCenter <= centerLeft )
+            right = centerLeft;
+        else if( neededCenter >= centerRight )
+            left = centerRight;
+        else if( neededCenter - centerLeft < centerRight - neededCenter )
+            return centerLeft;
+        else
+            return centerRight;
     }
+    return neededCenter;
 }
 
 // Builds a palette by creating a balanced k-d tree of all pixels in the image
@@ -310,9 +333,8 @@ void GifSplitPalette(uint8_t* image, int numPixels, int firstElt, int lastElt, i
     if(rRange > bRange && rRange > gRange) splitCom = 0;
 
     int subPixelsA = numPixels * (splitElt - firstElt) / (lastElt - firstElt);
+    subPixelsA = GifPartitionByMedian(image, splitCom, 0, numPixels, subPixelsA);
     int subPixelsB = numPixels-subPixelsA;
-
-    GifPartitionByMedian(image, 0, numPixels, splitCom, subPixelsA);
 
     pal->treeSplitElt[treeNode] = splitCom;
     pal->treeSplit[treeNode] = image[subPixelsA*4+splitCom];
