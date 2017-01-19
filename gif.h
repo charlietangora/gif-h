@@ -18,6 +18,8 @@
 // 8-bit paletted (with a power-of-two palette size).
 // (In the latter case you can save up to 768 bytes per frame by providing a global palette
 // and reusing it for some frames.)
+// Note that only 8-bit input frames can have transparent areas (producing a transparent
+// GIF disables delta-coding).
 // You can freely mix 32-bit and 8-bit input frames.
 //
 // USAGE:
@@ -93,6 +95,21 @@ bool GifPalettesEqual( const GifPalette* pPal1, const GifPalette* pPal2 )
              memcmp(pPal1->b, pPal2->b, 1 << pPal1->bitDepth));
 }
 
+// Update bestDiff and return true if color 'ind' is closer to r,g,b than bestDiff (and not transparent).
+bool GifBetterColorMatch(const GifPalette* pPal, int ind, int r, int g, int b, int& bestDiff)
+{
+    if(ind == kGifTransIndex) return false;
+
+    int r_err = r - ((int32_t)pPal->r[ind]);
+    int g_err = g - ((int32_t)pPal->g[ind]);
+    int b_err = b - ((int32_t)pPal->b[ind]);
+    int diff = GifIAbs(r_err)+GifIAbs(g_err)+GifIAbs(b_err);
+    if(diff >= bestDiff)
+        return false;
+    bestDiff = diff;
+    return true;
+}
+
 // walks the k-d tree to pick the palette entry for a desired color.
 // Takes as in/out parameters the current best color and its error -
 // only changes them if it finds a better color in its subtree.
@@ -103,20 +120,10 @@ void GifGetClosestPaletteColor(GifPalette* pPal, int r, int g, int b, int& bestI
     if(treeRoot > (1<<pPal->bitDepth)-1)
     {
         int ind = treeRoot-(1<<pPal->bitDepth);
-        if(ind == kGifTransIndex) return;
 
         // check whether this color is better than the current winner
-        int r_err = r - ((int32_t)pPal->r[ind]);
-        int g_err = g - ((int32_t)pPal->g[ind]);
-        int b_err = b - ((int32_t)pPal->b[ind]);
-        int diff = GifIAbs(r_err)+GifIAbs(g_err)+GifIAbs(b_err);
-
-        if(diff < bestDiff)
-        {
+        if( GifBetterColorMatch(pPal, ind, r, g, b, bestDiff) )
             bestInd = ind;
-            bestDiff = diff;
-        }
-
         return;
     }
 
@@ -566,12 +573,29 @@ void GifThresholdImage( const uint8_t* lastFrame, const uint8_t* nextFrame, uint
 
 // Compare an already paletted frame to the previous one.
 // nextFrame8 is 8-bit, lastFrame and outFrame are 32-bit.
-void GifDeltaImage( const uint8_t* lastFrame, const uint8_t* nextFrame8, uint8_t* outFrame, uint32_t width, uint32_t height, const GifPalette* pPal )
+void GifDeltaImage( const uint8_t* lastFrame, const uint8_t* nextFrame8, uint8_t* outFrame, uint32_t width, uint32_t height, bool deltaCoded, const GifPalette* pPal )
 {
     uint32_t numPixels = width*height;
+    int transReplacement = 0;
+    if(deltaCoded)
+    {
+        // Not allowed to use kGifTransIndex, so remap it to nearest match
+        int bestDiff = 1000000;
+        int r = pPal->r[kGifTransIndex], g = pPal->g[kGifTransIndex], b = pPal->b[kGifTransIndex];
+        for( int ind=0; ind<(1 << pPal->bitDepth); ++ind )
+        {
+            // check whether this color is better than the current winner
+            if( GifBetterColorMatch(pPal, ind, r, g, b, bestDiff) )
+                transReplacement = ind;
+        }
+    }
+
     for( uint32_t ii=0; ii<numPixels; ++ii )
     {
         int ind = nextFrame8[ii];
+        if(ind == kGifTransIndex)
+            ind = transReplacement;
+
         // if a previous color is available, and it matches the current color,
         // set the pixel to transparent
         if(lastFrame &&
@@ -678,14 +702,19 @@ void GifWritePalette( const GifPalette* pPal, FILE* f )
 }
 
 // write the image header, LZW-compress and write out the image
+// deltaCoded is true if transparency is used for delta coding, false if producing a transparent GIF
 // localPalette is true to write out pPal as a local palette; otherwise it is the global palette.
-void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uint32_t width, uint32_t height, uint32_t delay, const GifPalette* pPal, bool localPalette)
+void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uint32_t width, uint32_t height, uint32_t delay, const GifPalette* pPal, bool deltaCoded, bool localPalette)
 {
     // graphics control extension
     fputc(0x21, f);
     fputc(0xf9, f);
     fputc(0x04, f);
-    fputc(0x05, f); // leave prev frame in place, this frame has transparency
+    // disposal method
+    if( deltaCoded )
+        fputc(0x05, f); // leave this frame in place (next will draw on top)
+    else
+        fputc(0x09, f); // replace this frame with the background (so next can have transparent areas)
     fputc(delay & 0xff, f);
     fputc((delay >> 8) & 0xff, f);
     fputc(kGifTransIndex, f); // transparent color index
@@ -801,19 +830,23 @@ struct GifWriter
     FILE* f;
     uint8_t* oldImage;
     bool firstFrame;
+    bool deltaCoded;
     GifPalette* globalPal;
 };
 
 // Creates a gif file.
 // The input GIFWriter is assumed to be uninitialized.
 // The delay value is the time between frames in hundredths of a second - note that not all viewers pay much attention to this value.
+// transparent is whether to produce a transparent GIF. It only works if using GifWriteFrame8()
+//     to provide images containing transparency, and it disables delta coding.
 // globalPal is a default palette to use for GifWriteFrame8(). It is not used by GifWriteFrame().
-bool GifBegin( GifWriter* writer, FILE *file, uint32_t width, uint32_t height, uint32_t delay, const GifPalette* globalPal = NULL )
+bool GifBegin( GifWriter* writer, FILE *file, uint32_t width, uint32_t height, uint32_t delay, bool transparent = false, const GifPalette* globalPal = NULL )
 {
     if(!file) return false;
     writer->f = file;
 
     writer->firstFrame = true;
+    writer->deltaCoded = !transparent;
 
     // allocate
     writer->oldImage = (uint8_t*)GIF_MALLOC(width*height*4);
@@ -882,6 +915,11 @@ bool GifWriteFrame( GifWriter* writer, const uint8_t* image, uint32_t width, uin
     if(!writer->f) return false;
 
     const uint8_t* oldImage = writer->firstFrame? NULL : writer->oldImage;
+    // Only GifWriteFrame8 can produce transparent frames, but the frame before the current one
+    // needs to be set to 'background' disposal to support that. So for simplicity, we disable
+    // delta coding for all frames.
+    if(!writer->deltaCoded)
+        oldImage = NULL;
     writer->firstFrame = false;
 
     GifPalette pal;
@@ -894,19 +932,24 @@ bool GifWriteFrame( GifWriter* writer, const uint8_t* image, uint32_t width, uin
     else
         GifThresholdImage(oldImage, image, writer->oldImage, width, height, &pal);
 
-    GifWriteLzwImage(writer->f, writer->oldImage, 0, 0, width, height, delay, &pal, true);
+    GifWriteLzwImage(writer->f, writer->oldImage, 0, 0, width, height, delay, &pal, writer->deltaCoded, true);
 
     return true;
 }
 
 // (See also GifWriteFrame.)
 // If palette is NULL, or if it is identical to the global palette, then the global palette is used.
-bool GifWriteFrame8( GifWriter* writer, const uint8_t* image, uint32_t width, uint32_t height, uint32_t delay, const GifPalette* pal )
+// If the GIF is transparent then index kGifTransIndex is transparency, otherwise
+// all color indices may be used (however, kGifTransIndex is internally used for delta-coding so
+// when it occurs in the input it will be replaced with the nearest match, so it's better to avoid it).
+bool GifWriteFrame8( GifWriter* writer, const uint8_t* image, uint32_t width, uint32_t height, uint32_t delay, const GifPalette* pal = NULL )
 {
     if(!writer->f) return false;   
     if(!writer->globalPal && !pal) return false;
 
     const uint8_t* oldImage = writer->firstFrame? NULL : writer->oldImage;
+    if(!writer->deltaCoded)
+        oldImage = NULL;
     writer->firstFrame = false;
 
     // Only write the local palette if it differs from global, or if there is no global palette
@@ -916,9 +959,9 @@ bool GifWriteFrame8( GifWriter* writer, const uint8_t* image, uint32_t width, ui
     if(!pal)
         pal = writer->globalPal;
 
-    GifDeltaImage(oldImage, image, writer->oldImage, width, height, pal);
+    GifDeltaImage(oldImage, image, writer->oldImage, width, height, writer->deltaCoded, pal);
 
-    GifWriteLzwImage(writer->f, writer->oldImage, 0, 0, width, height, delay, pal, localPalette);
+    GifWriteLzwImage(writer->f, writer->oldImage, 0, 0, width, height, delay, pal, writer->deltaCoded, localPalette);
 
     return true;
 }
