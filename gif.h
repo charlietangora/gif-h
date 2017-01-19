@@ -21,6 +21,8 @@
 // Pass subsequent frames to GifWriteFrame().
 // Finally, call GifEnd() to close the file handle and free memory.
 //
+// A frame is of the type uint8_t*, or more specific, uint8_t[width][height][4], such that
+//    frame[x][y] = [red, green, blue, alpha]
 
 #ifndef gif_h
 #define gif_h
