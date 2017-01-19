@@ -14,11 +14,15 @@
 // So resulting files are often quite large. The hope is that it will be handy nonetheless
 // as a quick and easily-integrated way for programs to spit out animations.
 //
-// Only RGBA8 is currently supported as an input format. (The alpha is ignored.)
+// There are two supported input formats, RGBA8 (the alpha is ignored), and
+// 8-bit paletted (with a power-of-two palette size).
+// (In the latter case you can save up to 768 bytes per frame by providing a global palette
+// and reusing it for some frames.)
+// You can freely mix 32-bit and 8-bit input frames.
 //
 // USAGE:
 // Create a GifWriter struct. Pass it to GifBegin() to initialize and write the header.
-// Pass subsequent frames to GifWriteFrame().
+// Pass subsequent frames to GifWriteFrame() or GifWriteFrame8().
 // Finally, call GifEnd() to close the file handle and free memory.
 //
 // A frame is of the type uint8_t*, or more specific, uint8_t[width][height][4], such that
@@ -67,6 +71,7 @@ struct GifPalette
     uint8_t g[256];
     uint8_t b[256];
 
+    // (The following do not need to be initialised when passed to GifBegin() and GifWriteFrame8().)
     // k-d tree over RGB space, organized in heap fashion
     // i.e. left child of node i is node i*2, right child is node i*2+1
     // nodes 256-511 are implicitly the leaves, containing a color
@@ -78,6 +83,15 @@ struct GifPalette
 int GifIMax(int l, int r) { return l>r?l:r; }
 int GifIMin(int l, int r) { return l<r?l:r; }
 int GifIAbs(int i) { return i<0?-i:i; }
+
+// Check if two palettes are equal
+bool GifPalettesEqual( const GifPalette* pPal1, const GifPalette* pPal2 )
+{
+    if( pPal1->bitDepth != pPal2->bitDepth ) return false;
+    return !(memcmp(pPal1->r, pPal2->r, 1 << pPal1->bitDepth) ||
+             memcmp(pPal1->g, pPal2->g, 1 << pPal1->bitDepth) ||
+             memcmp(pPal1->b, pPal2->b, 1 << pPal1->bitDepth));
+}
 
 // walks the k-d tree to pick the palette entry for a desired color.
 // Takes as in/out parameters the current best color and its error -
@@ -345,7 +359,7 @@ void GifSplitPalette(uint8_t* image, int numPixels, int firstElt, int lastElt, i
 }
 
 // Finds all pixels that have changed from the previous image and
-// moves them to the fromt of th buffer.
+// moves them to the front of the buffer.
 // This allows us to build a palette optimized for the colors of the
 // changed pixels only.
 int GifPickChangedPixels( const uint8_t* lastFrame, uint8_t* frame, int numPixels )
@@ -550,6 +564,39 @@ void GifThresholdImage( const uint8_t* lastFrame, const uint8_t* nextFrame, uint
     }
 }
 
+// Compare an already paletted frame to the previous one.
+// nextFrame8 is 8-bit, lastFrame and outFrame are 32-bit.
+void GifDeltaImage( const uint8_t* lastFrame, const uint8_t* nextFrame8, uint8_t* outFrame, uint32_t width, uint32_t height, const GifPalette* pPal )
+{
+    uint32_t numPixels = width*height;
+    for( uint32_t ii=0; ii<numPixels; ++ii )
+    {
+        int ind = nextFrame8[ii];
+        // if a previous color is available, and it matches the current color,
+        // set the pixel to transparent
+        if(lastFrame &&
+           lastFrame[0] == pPal->r[ind] &&
+           lastFrame[1] == pPal->g[ind] &&
+           lastFrame[2] == pPal->b[ind])
+        {
+            outFrame[0] = lastFrame[0];
+            outFrame[1] = lastFrame[1];
+            outFrame[2] = lastFrame[2];
+            outFrame[3] = kGifTransIndex;
+        }
+        else
+        {
+            outFrame[0] = pPal->r[ind];
+            outFrame[1] = pPal->g[ind];
+            outFrame[2] = pPal->b[ind];
+            outFrame[3] = ind;
+        }
+        
+        if(lastFrame) lastFrame += 4;
+        outFrame += 4;
+    }
+}
+
 // Simple structure to write out the LZW-compressed portion of the image
 // one bit at a time
 struct GifBitStatus
@@ -631,7 +678,8 @@ void GifWritePalette( const GifPalette* pPal, FILE* f )
 }
 
 // write the image header, LZW-compress and write out the image
-void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uint32_t width, uint32_t height, uint32_t delay, GifPalette* pPal)
+// localPalette is true to write out pPal as a local palette; otherwise it is the global palette.
+void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uint32_t width, uint32_t height, uint32_t delay, const GifPalette* pPal, bool localPalette)
 {
     // graphics control extension
     fputc(0x21, f);
@@ -655,11 +703,15 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uin
     fputc(height & 0xff, f);
     fputc((height >> 8) & 0xff, f);
 
-    //fputc(0, f); // no local color table, no transparency
-    //fputc(0x80, f); // no local color table, but transparency
-
-    fputc(0x80 + pPal->bitDepth-1, f); // local color table present, 2 ^ bitDepth entries
-    GifWritePalette(pPal, f);
+    if( localPalette )
+    {
+        fputc(0x80 + pPal->bitDepth-1, f); // local color table present, 2 ^ bitDepth entries
+        GifWritePalette(pPal, f);
+    }
+    else
+    {
+        fputc(0, f); // no local color table
+    }
 
     const int minCodeSize = pPal->bitDepth;
     const uint32_t clearCode = 1 << pPal->bitDepth;
@@ -749,12 +801,14 @@ struct GifWriter
     FILE* f;
     uint8_t* oldImage;
     bool firstFrame;
+    GifPalette* globalPal;
 };
 
 // Creates a gif file.
 // The input GIFWriter is assumed to be uninitialized.
 // The delay value is the time between frames in hundredths of a second - note that not all viewers pay much attention to this value.
-bool GifBegin( GifWriter* writer, FILE *file, uint32_t width, uint32_t height, uint32_t delay )
+// globalPal is a default palette to use for GifWriteFrame8(). It is not used by GifWriteFrame().
+bool GifBegin( GifWriter* writer, FILE *file, uint32_t width, uint32_t height, uint32_t delay, const GifPalette* globalPal = NULL )
 {
     if(!file) return false;
     writer->f = file;
@@ -772,19 +826,33 @@ bool GifBegin( GifWriter* writer, FILE *file, uint32_t width, uint32_t height, u
     fputc(height & 0xff, writer->f);
     fputc((height >> 8) & 0xff, writer->f);
 
-    fputc(0xf0, writer->f);  // there is an unsorted global color table of 2 entries
+    if( globalPal )
+        fputc(0xf0 + (globalPal->bitDepth - 1), writer->f);  // there is an unsorted global color table
+    else
+        fputc(0xf0, writer->f);  // there is an unsorted global color table of 2 entries
     fputc(0, writer->f);     // background color
     fputc(0, writer->f);     // pixels are square (we need to specify this because it's 1989)
 
-    // now the "global" palette (really just a dummy palette)
-    // color 0: black
-    fputc(0, writer->f);
-    fputc(0, writer->f);
-    fputc(0, writer->f);
-    // color 1: also black
-    fputc(0, writer->f);
-    fputc(0, writer->f);
-    fputc(0, writer->f);
+    if( globalPal )
+    {
+        writer->globalPal = (GifPalette*)GIF_MALLOC(sizeof(GifPalette));
+        memcpy(writer->globalPal, globalPal, sizeof(GifPalette));
+        // write the global palette
+        GifWritePalette(globalPal, writer->f);
+    }
+    else
+    {
+        writer->globalPal = NULL;
+        // now the "global" palette (really just a dummy palette)
+        // color 0: black
+        fputc(0, writer->f);
+        fputc(0, writer->f); 
+        fputc(0, writer->f);
+        // color 1: also black
+        fputc(0, writer->f);
+        fputc(0, writer->f);
+        fputc(0, writer->f);
+    }
 
     if( delay != 0 )
     {
@@ -826,7 +894,31 @@ bool GifWriteFrame( GifWriter* writer, const uint8_t* image, uint32_t width, uin
     else
         GifThresholdImage(oldImage, image, writer->oldImage, width, height, &pal);
 
-    GifWriteLzwImage(writer->f, writer->oldImage, 0, 0, width, height, delay, &pal);
+    GifWriteLzwImage(writer->f, writer->oldImage, 0, 0, width, height, delay, &pal, true);
+
+    return true;
+}
+
+// (See also GifWriteFrame.)
+// If palette is NULL, or if it is identical to the global palette, then the global palette is used.
+bool GifWriteFrame8( GifWriter* writer, const uint8_t* image, uint32_t width, uint32_t height, uint32_t delay, const GifPalette* pal )
+{
+    if(!writer->f) return false;   
+    if(!writer->globalPal && !pal) return false;
+
+    const uint8_t* oldImage = writer->firstFrame? NULL : writer->oldImage;
+    writer->firstFrame = false;
+
+    // Only write the local palette if it differs from global, or if there is no global palette
+    if(pal && writer->globalPal && GifPalettesEqual(writer->globalPal, pal))
+        pal = NULL;
+    bool localPalette = (pal != NULL);
+    if(!pal)
+        pal = writer->globalPal;
+
+    GifDeltaImage(oldImage, image, writer->oldImage, width, height, pal);
+
+    GifWriteLzwImage(writer->f, writer->oldImage, 0, 0, width, height, delay, pal, localPalette);
 
     return true;
 }
@@ -841,9 +933,11 @@ bool GifEnd( GifWriter* writer )
     fputc(0x3b, writer->f); // end of file
     fclose(writer->f);
     GIF_FREE(writer->oldImage);
+    GIF_FREE(writer->globalPal);
 
     writer->f = NULL;
     writer->oldImage = NULL;
+    writer->globalPal = NULL;
 
     return true;
 }
