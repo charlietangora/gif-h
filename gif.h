@@ -20,7 +20,7 @@
 // and reusing it for some frames.)
 // Note that only 8-bit input frames can have transparent areas (producing a transparent
 // GIF disables delta-coding).
-// You can freely mix 32-bit and 8-bit input frames.
+// You can freely mix 32-bit and 8-bit input frames and even frames with differing sizes.
 //
 // USAGE:
 // Create a GifWriter struct. Pass it to GifBegin() to initialize and write the header.
@@ -42,6 +42,7 @@
 // and any temp memory allocated by a function will be freed before it exits.
 // MALLOC and FREE are used only by GifBegin and GifEnd respectively (to allocate a buffer the size of the image, which
 // is used to find changed pixels for delta-encoding.)
+// REALLOC is only used if you mix different frame sizes.
 
 #ifndef GIF_TEMP_MALLOC
 #include <stdlib.h>
@@ -56,6 +57,11 @@
 #ifndef GIF_MALLOC
 #include <stdlib.h>
 #define GIF_MALLOC malloc
+#endif
+
+#ifndef GIF_REALLOC
+#include <stdlib.h>
+#define GIF_REALLOC realloc
 #endif
 
 #ifndef GIF_FREE
@@ -682,13 +688,12 @@ struct GifLzwNode
     uint16_t m_next[256];
 };
 
-// write a 256-color (8-bit) image palette to the file
+// write an image palette to the file
 void GifWritePalette( const GifPalette* pPal, FILE* f )
 {
     fputc(0, f);  // first color: transparency
     fputc(0, f);
     fputc(0, f);
-
     for(int ii=1; ii<(1 << pPal->bitDepth); ++ii)
     {
         uint32_t r = pPal->r[ii];
@@ -832,7 +837,27 @@ struct GifWriter
     bool firstFrame;
     bool deltaCoded;
     GifPalette* globalPal;
+    int maxWidth;
+    int maxHeight;
+    int currentWidth;
+    int currentHeight;
+    bool sizeChanged;
 };
+
+// Handle a call to GifWriteFrame[8] with a different image size to the previous
+void GifHandleSizeChange( GifWriter* writer, int width, int height )
+{
+    if(writer->currentWidth != width || writer->currentHeight != height)
+    {
+        writer->maxWidth = GifIMax(writer->maxWidth, width);
+        writer->maxHeight = GifIMax(writer->maxHeight, height);
+        writer->currentWidth = width;
+        writer->currentHeight = height;
+        writer->oldImage = (uint8_t*)GIF_REALLOC(writer->oldImage, width*height*4);
+        writer->firstFrame = true;  // Ignore the contents of oldImage
+        writer->sizeChanged = true;
+    }
+}
 
 // Creates a gif file.
 // The input GIFWriter is assumed to be uninitialized.
@@ -858,6 +883,9 @@ bool GifBegin( GifWriter* writer, FILE *file, uint32_t width, uint32_t height, u
     fputc((width >> 8) & 0xff, writer->f);
     fputc(height & 0xff, writer->f);
     fputc((height >> 8) & 0xff, writer->f);
+    writer->currentWidth = writer->maxWidth = width;
+    writer->currentHeight = writer->maxHeight = height;
+    writer->sizeChanged = false;
 
     if( globalPal )
         fputc(0xf0 + (globalPal->bitDepth - 1), writer->f);  // there is an unsorted global color table
@@ -914,6 +942,7 @@ bool GifWriteFrame( GifWriter* writer, const uint8_t* image, uint32_t width, uin
 {
     if(!writer->f) return false;
 
+    GifHandleSizeChange(writer, width, height);
     const uint8_t* oldImage = writer->firstFrame? NULL : writer->oldImage;
     // Only GifWriteFrame8 can produce transparent frames, but the frame before the current one
     // needs to be set to 'background' disposal to support that. So for simplicity, we disable
@@ -947,6 +976,7 @@ bool GifWriteFrame8( GifWriter* writer, const uint8_t* image, uint32_t width, ui
     if(!writer->f) return false;   
     if(!writer->globalPal && !pal) return false;
 
+    GifHandleSizeChange(writer, width, height);
     const uint8_t* oldImage = writer->firstFrame? NULL : writer->oldImage;
     if(!writer->deltaCoded)
         oldImage = NULL;
@@ -974,6 +1004,14 @@ bool GifEnd( GifWriter* writer )
     if(!writer->f) return false;
 
     fputc(0x3b, writer->f); // end of file
+    if(writer->sizeChanged)
+    {
+        fseek(writer->f, 6, SEEK_SET);
+        fputc(writer->maxWidth & 0xff, writer->f);
+        fputc((writer->maxWidth >> 8) & 0xff, writer->f);
+        fputc(writer->maxHeight & 0xff, writer->f);
+        fputc((writer->maxHeight >> 8) & 0xff, writer->f);
+    }
     fclose(writer->f);
     GIF_FREE(writer->oldImage);
     GIF_FREE(writer->globalPal);
