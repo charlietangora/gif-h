@@ -778,7 +778,7 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uin
 
             if( curCode < 0 )
             {
-                // first value in a new run
+                // the first value in the image
                 curCode = nextValue;
             }
             else if( codetree[curCode].m_next[nextValue] )
@@ -806,7 +806,6 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uin
                     GifWriteCode(f, stat, clearCode, codeSize); // clear tree
 
                     memset(codetree, 0, sizeof(GifLzwNode)*4096);
-                    nextValue = -1;
                     codeSize = minCodeSize+1;
                     maxCode = clearCode+1;
                 }
