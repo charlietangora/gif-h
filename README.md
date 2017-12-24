@@ -8,7 +8,11 @@ encoding - only the changed portions of each frame are saved.)
 
 So resulting files are often quite large. The hope is that it will be handy nonetheless as a quick and easily-integrated way for programs to spit out animations.
 
-Only RGBA8 is currently supported as an input format. (The alpha is ignored.) 
+There are two supported input formats, RGBA8 (the alpha is ignored), and 8-bit paletted (with a
+power-of-two palette size).  (In the latter case you can save up to 768 bytes per frame by providing
+a global palette and reusing it for some frames.)  You can freely mix 32-bit and 8-bit input frames,
+and even frames with differing sizes. Note that only 8-bit input frames can have transparent areas
+(producing a transparent GIF disables delta-coding).
 
 Email me : ctangora -at- gmail -dot- com
 
@@ -18,6 +22,6 @@ Create a GifWriter struct.
 
 Pass the struct to GifBegin() to initialize values and write the file header.
 
-Pass frames of the animation to GifWriteFrame().
+Pass frames of the animation to GifWriteFrame() or GifWriteFrame8().
 
 Finally, call GifEnd() to close the file handle and free memory.
