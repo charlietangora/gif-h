@@ -27,7 +27,7 @@ Finally, call GifEnd() to close the file handle and free memory.
     {
         int width = 100;
         int height = 200;
-        vector<uint8_t> vi1(width * height * 4, 0);
+        vector<uint8_t> vi1(width * height * 4, 0);   // 4 channels, RGBA
         vector<uint8_t> vi2(width * height * 4, 255);
 
         auto fileName = "bwgif.gif";
