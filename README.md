@@ -31,7 +31,7 @@ Finally, call GifEnd() to close the file handle and free memory.
         vector<uint8_t> vi2(width * height * 4, 255);
 
         auto fileName = "bwgif.gif";
-        int delay = 100;
+        int delay = 100; // 100ms
         GifWriter g;
         GifBegin(&g, fileName, width, height, delay);
         GifWriteFrame(&g, vi1.data(), width, height, delay);
