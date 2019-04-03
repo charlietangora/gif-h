@@ -21,3 +21,22 @@ Pass the struct to GifBegin() to initialize values and write the file header.
 Pass frames of the animation to GifWriteFrame().
 
 Finally, call GifEnd() to close the file handle and free memory.
+
+#include <gif.h>
+int main(void)
+{
+    int width = 100;
+    int height = 200;
+    vector<uint8_t> vi1(width * height * 4, 0);
+    vector<uint8_t> vi2(width * height * 4, 255);
+
+    auto fileName = "bwgif.gif";
+    int delay = 100;
+    GifWriter g;
+    GifBegin(&g, fileName, width, height, delay);
+    GifWriteFrame(&g, vi1.data(), width, height, delay);
+    GifWriteFrame(&g, vi2.data(), width, height, delay);
+    GifEnd(&g);
+
+    return 0;
+}
