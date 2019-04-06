@@ -16,6 +16,10 @@
 //
 // Only RGBA8 is currently supported as an input format. (The alpha is ignored.)
 //
+// If capturing a buffer with a bottom-left origin (such as OpenGL), define GIF_FLIP_VERT
+// to automatically flip the buffer data when writing the image (the buffer itself is
+// unchanged.
+//
 // USAGE:
 // Create a GifWriter struct. Pass it to GifBegin() to initialize and write the header.
 // Pass subsequent frames to GifWriteFrame().
@@ -655,7 +659,13 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uin
     {
         for(uint32_t xx=0; xx<width; ++xx)
         {
+    #ifdef GIF_FLIP_VERT
+            // bottom-left origin image (such as an OpenGL capture)
+            uint8_t nextValue = image[((height-1-yy)*width+xx)*4+3];
+    #else
+            // top-left origin
             uint8_t nextValue = image[(yy*width+xx)*4+3];
+    #endif
 
             // "loser mode" - no compression, every single code is followed immediately by a clear
             //WriteCode( f, stat, nextValue, codeSize );
