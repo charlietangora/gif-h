@@ -6,6 +6,7 @@
 #include <QSize>
 #include <QDataStream>
 #include <QImage>
+#include <array>
 
 class QBuffer;
 
