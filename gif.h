@@ -32,6 +32,7 @@
 #include <stdio.h>   // for FILE*
 #include <string.h>  // for memcpy and bzero
 #include <stdint.h>  // for integer typedefs
+#include <cassert>   // for assert
 
 // Define these macros to hook into a custom memory allocator.
 // TEMP_MALLOC and TEMP_FREE will only be called in stack fashion - frees in the reverse order of mallocs
@@ -63,6 +64,20 @@ const int kGifTransIndex = 0;
 
 struct GifPalette
 {
+    GifPalette()
+    {
+      for (std::size_t i = 0; i < 256; ++i) {
+        r[i] = 0;
+        g[i] = 0;
+        b[i] = 0;
+      }
+      for (std::size_t i = 0; i < 255; ++i) {
+        treeSplit[i] = 0;
+        treeSplitElt[i] = 0;
+      }
+      bitDepth = 0;
+    }
+
     int bitDepth;
 
     uint8_t r[256];
@@ -91,14 +106,15 @@ void GifGetClosestPaletteColor(GifPalette* pPal, int r, int g, int b, int& bestI
     if(treeRoot > (1<<pPal->bitDepth)-1)
     {
         int ind = treeRoot-(1<<pPal->bitDepth);
-        if(ind == kGifTransIndex) return;
+        if(ind == kGifTransIndex) {
+          return;
+        }
 
         // check whether this color is better than the current winner
         int r_err = r - ((int32_t)pPal->r[ind]);
         int g_err = g - ((int32_t)pPal->g[ind]);
         int b_err = b - ((int32_t)pPal->b[ind]);
         int diff = GifIAbs(r_err)+GifIAbs(g_err)+GifIAbs(b_err);
-
         if(diff < bestDiff)
         {
             bestInd = ind;
@@ -529,6 +545,15 @@ void GifThresholdImage( const uint8_t* lastFrame, const uint8_t* nextFrame, uint
 // one bit at a time
 struct GifBitStatus
 {
+    GifBitStatus()
+    {
+      bitIndex = 0;
+      byte = 0;
+      chunkIndex = 0;
+      for (std::size_t i = 0; i < 256; ++i) {
+        chunk[i] = 0;
+      }
+    }
     uint8_t bitIndex;  // how many bits in the partial byte written so far
     uint8_t byte;      // current partial byte
 
@@ -583,6 +608,12 @@ void GifWriteCode( FILE* f, GifBitStatus& stat, uint32_t code, uint32_t length )
 // this is one node
 struct GifLzwNode
 {
+    GifLzwNode()
+    {
+      for (std::size_t i = 0; i < 256; ++i) {
+        m_next[i] = 0;
+      }
+    }
     uint16_t m_next[256];
 };
 
@@ -726,9 +757,9 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uin
 
 struct GifWriter
 {
-    FILE* f;
-    uint8_t* oldImage;
-    bool firstFrame;
+    FILE* f = nullptr;
+    uint8_t* oldImage = nullptr;
+    bool firstFrame = true;
 };
 
 // Creates a gif file.
@@ -738,7 +769,7 @@ bool GifBegin( GifWriter* writer, const char* filename, uint32_t width, uint32_t
 {
     (void)bitDepth; (void)dither; // Mute "Unused argument" warnings
 #if defined(_MSC_VER) && (_MSC_VER >= 1400)
-	writer->f = 0;
+    writer->f = 0;
     fopen_s(&writer->f, filename, "wb");
 #else
     writer->f = fopen(filename, "wb");
@@ -800,6 +831,11 @@ bool GifWriteFrame( GifWriter* writer, const uint8_t* image, uint32_t width, uin
     if(!writer->f) return false;
 
     const uint8_t* oldImage = writer->firstFrame? NULL : writer->oldImage;
+    if (writer->firstFrame) {
+      for (std::size_t i = 0; i < width * height * 4; ++i) {
+        writer->oldImage[i] = 0;
+      }
+    }
     writer->firstFrame = false;
 
     GifPalette pal;
