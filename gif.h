@@ -123,6 +123,7 @@ void GifGetClosestPaletteColor(GifPalette* pPal, int r, int g, int b, int& bestI
 
         return;
     }
+    assert(treeRoot < 255);  // this will fail
 
     // take the appropriate color (r, g, or b) for this node of the k-d tree
     int comps[3]; comps[0] = r; comps[1] = g; comps[2] = b;
