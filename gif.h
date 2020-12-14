@@ -735,6 +735,7 @@ typedef struct
 // Creates a gif file.
 // The input GIFWriter is assumed to be uninitialized.
 // The delay value is the time between frames in hundredths of a second - note that not all viewers pay much attention to this value.
+// The loop value specifies the number of times the frame sequence should be repeated (1 to 65535 times) or that it should repeat continuously when loop is 0.
 bool GifBegin( GifWriter* writer, const char* filename, uint32_t width, uint32_t height, uint32_t delay, uint16_t loop = 0, int32_t bitDepth = 8, bool dither = false )
 {
     (void)bitDepth; (void)dither; // Mute "Unused argument" warnings
