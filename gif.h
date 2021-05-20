@@ -406,9 +406,9 @@ void GifDitherImage( const uint8_t* lastFrame, const uint8_t* nextFrame, uint8_t
             // if it happens that we want the color from last frame, then just write out
             // a transparent pixel
             if( lastFrame &&
-               lastPix[0] == rr &&
-               lastPix[1] == gg &&
-               lastPix[2] == bb )
+                lastPix[0] == rr &&
+                lastPix[1] == gg &&
+                lastPix[2] == bb )
             {
                 nextPix[0] = rr;
                 nextPix[1] = gg;
@@ -614,7 +614,7 @@ void GifWritePalette( const GifPalette* pPal, FILE* f )
 }
 
 // write the image header, LZW-compress and write out the image
-void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uint32_t width, uint32_t height, uint32_t delay, GifPalette* pPal)
+void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uint32_t width, uint32_t height, uint32_t delay, GifPalette* pPal, uint8_t transparent)
 {
     // graphics control extension
     fputc(0x21, f);
@@ -744,7 +744,7 @@ bool GifBegin( GifWriter* writer, const char* filename, uint32_t width, uint32_t
 {
     (void)bitDepth; (void)dither; // Mute "Unused argument" warnings
 #if defined(_MSC_VER) && (_MSC_VER >= 1400)
-	writer->f = 0;
+    writer->f = 0;
     fopen_s(&writer->f, filename, "wb");
 #else
     writer->f = fopen(filename, "wb");
