@@ -368,6 +368,10 @@ void GifMakePalette( const uint8_t* lastFrame, const uint8_t* nextFrame, uint32_
     const int splitElt = lastElt/2;
     const int splitDist = splitElt/2;
 
+    memset(pPal->r, 0, lastElt);
+    memset(pPal->g, 0, lastElt);
+    memset(pPal->b, 0, lastElt);
+
     GifSplitPalette(destroyableImage, numPixels, 1, lastElt, splitElt, splitDist, 1, buildForDither, pPal);
 
     GIF_TEMP_FREE(destroyableImage);
@@ -375,8 +379,6 @@ void GifMakePalette( const uint8_t* lastFrame, const uint8_t* nextFrame, uint32_
     // add the bottom node for the transparency index
     pPal->treeSplit[1 << (bitDepth-1)] = 0;
     pPal->treeSplitElt[1 << (bitDepth-1)] = 0;
-
-    pPal->r[0] = pPal->g[0] = pPal->b[0] = 0;
 }
 
 // Implements Floyd-Steinberg dithering, writes palette value to alpha
