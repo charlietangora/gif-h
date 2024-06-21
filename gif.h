@@ -758,8 +758,10 @@ typedef struct
 
 // Creates a gif file.
 // The input GIFWriter is assumed to be uninitialized.
-// The delay value is the time between frames in hundredths of a second - note that not all viewers pay much attention to this value.
-bool GifBegin( GifWriter* writer, const char* filename, uint32_t width, uint32_t height, uint32_t delay, int32_t bitDepth = 8, bool dither = false )
+// The delay value is the time between frames in hundredths of a second.
+// The repeat value is the number of times the sequence should be repeated (1 to 65535 times) or loop when repeat is zero.
+// Note that not all viewers pay much attention to these values.
+bool GifBegin( GifWriter* writer, const char* filename, uint32_t width, uint32_t height, uint32_t delay, int32_t bitDepth = 8, bool dither = false, uint16_t repeat = 0)
 {
     (void)bitDepth; (void)dither; // Mute "Unused argument" warnings
 #if defined(_MSC_VER) && (_MSC_VER >= 1400)
@@ -797,7 +799,7 @@ bool GifBegin( GifWriter* writer, const char* filename, uint32_t width, uint32_t
     fputc(0, writer->f);
     fputc(0, writer->f);
 
-    if( delay != 0 )
+    if( delay != 0 || repeat != 0 )
     {
         // animation header
         fputc(0x21, writer->f); // extension
@@ -807,8 +809,8 @@ bool GifBegin( GifWriter* writer, const char* filename, uint32_t width, uint32_t
         fputc(3, writer->f); // 3 bytes of NETSCAPE2.0 data
 
         fputc(1, writer->f); // JUST BECAUSE
-        fputc(0, writer->f); // loop infinitely (byte 0)
-        fputc(0, writer->f); // loop infinitely (byte 1)
+        fputc(repeat & 0xFF, writer->f); // repeat (byte 0)
+        fputc((repeat & 0xFF00) >> 8, writer->f); // repeat (byte 1)
 
         fputc(0, writer->f); // block terminator
     }
