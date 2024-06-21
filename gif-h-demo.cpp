@@ -19,8 +19,8 @@ void SetPixel( int xx, int yy, uint8_t red, uint8_t grn, uint8_t blu )
 {
     uint8_t* pixel = &image[(yy*width+xx)*4];
     pixel[0] = red;
-    pixel[1] = blu;
-    pixel[2] = grn;
+    pixel[1] = grn;
+    pixel[2] = blu;
     pixel[3] = 255;  // no alpha for this demo
 }
 
