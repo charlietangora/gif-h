@@ -158,13 +158,11 @@ void GifSwapPixels(uint8_t* image, int pixA, int pixB)
 }
 
 // just the partition operation from quicksort
-int GifPartition(uint8_t* image, const int left, const int right, const int elt, int pivotIndex)
+int GifPartition(uint8_t* image, const int left, const int right, const int elt, int pivotValue)
 {
-    const int pivotValue = image[(pivotIndex)*4+elt];
-    GifSwapPixels(image, pivotIndex, right-1);
     int storeIndex = left;
     bool split = 0;
-    for(int ii=left; ii<right-1; ++ii)
+    for(int ii=left; ii<right; ++ii)
     {
         int arrayVal = image[ii*4+elt];
         if( arrayVal < pivotValue )
@@ -182,7 +180,6 @@ int GifPartition(uint8_t* image, const int left, const int right, const int elt,
             split = !split;
         }
     }
-    GifSwapPixels(image, storeIndex, right-1);
     return storeIndex;
 }
 
@@ -191,9 +188,10 @@ void GifPartitionByMedian(uint8_t* image, int left, int right, int com, int need
 {
     if(left < right-1)
     {
-        int pivotIndex = left + (right-left)/2;
-
-        pivotIndex = GifPartition(image, left, right, com, pivotIndex);
+        int pivotValue = image[(neededCenter)*4+com];
+        GifSwapPixels(image, neededCenter, right-1);
+        int pivotIndex = GifPartition(image, left, right-1, com, pivotValue);
+        GifSwapPixels(image, pivotIndex, right-1);
 
         // Only "sort" the section of the array that contains the median
         if(pivotIndex > neededCenter)
@@ -204,21 +202,35 @@ void GifPartitionByMedian(uint8_t* image, int left, int right, int com, int need
     }
 }
 
-// Builds a palette by creating a balanced k-d tree of all pixels in the image
-void GifSplitPalette(uint8_t* image, int numPixels, int firstElt, int lastElt, int splitElt, int splitDist, int treeNode, bool buildForDither, GifPalette* pal)
+// Just partition around a given pivot, returning the split point
+int GifPartitionByMean(uint8_t* image, int left, int right, int com, int neededMean)
 {
-    if(lastElt <= firstElt || numPixels == 0)
+    if(left < right-1)
+    {
+        return GifPartition(image, left, right-1, com, neededMean);
+    }
+    return left;
+}
+
+// Builds a palette by creating a balanced k-d tree of all pixels in the image
+void GifSplitPalette(uint8_t* image, int numPixels, int treeNode, int treeLevel, bool buildForDither, GifPalette* pal)
+{
+    if(numPixels == 0)
         return;
 
+    int numColors = (1 << pal->bitDepth);
+
     // base case, bottom of the tree
-    if(lastElt == firstElt+1)
+    if(treeNode >= numColors)
     {
+        int entry = treeNode - numColors;
+
         if(buildForDither)
         {
             // Dithering needs at least one color as dark as anything
             // in the image and at least one brightest color -
             // otherwise it builds up error and produces strange artifacts
-            if( firstElt == 1 )
+            if( entry == 1 )
             {
                 // special case: the darkest color in the image
                 uint32_t r=255, g=255, b=255;
@@ -229,14 +241,14 @@ void GifSplitPalette(uint8_t* image, int numPixels, int firstElt, int lastElt, i
                     b = (uint32_t)GifIMin((int32_t)b, image[ii * 4 + 2]);
                 }
 
-                pal->r[firstElt] = (uint8_t)r;
-                pal->g[firstElt] = (uint8_t)g;
-                pal->b[firstElt] = (uint8_t)b;
+                pal->r[entry] = (uint8_t)r;
+                pal->g[entry] = (uint8_t)g;
+                pal->b[entry] = (uint8_t)b;
 
                 return;
             }
 
-            if( firstElt == (1 << pal->bitDepth)-1 )
+            if( entry == numColors-1 )
             {
                 // special case: the lightest color in the image
                 uint32_t r=0, g=0, b=0;
@@ -247,9 +259,9 @@ void GifSplitPalette(uint8_t* image, int numPixels, int firstElt, int lastElt, i
                     b = (uint32_t)GifIMax((int32_t)b, image[ii * 4 + 2]);
                 }
 
-                pal->r[firstElt] = (uint8_t)r;
-                pal->g[firstElt] = (uint8_t)g;
-                pal->b[firstElt] = (uint8_t)b;
+                pal->r[entry] = (uint8_t)r;
+                pal->g[entry] = (uint8_t)g;
+                pal->b[entry] = (uint8_t)b;
 
                 return;
             }
@@ -272,9 +284,9 @@ void GifSplitPalette(uint8_t* image, int numPixels, int firstElt, int lastElt, i
         g /= (uint64_t)numPixels;
         b /= (uint64_t)numPixels;
 
-        pal->r[firstElt] = (uint8_t)r;
-        pal->g[firstElt] = (uint8_t)g;
-        pal->b[firstElt] = (uint8_t)b;
+        pal->r[entry] = (uint8_t)r;
+        pal->g[entry] = (uint8_t)g;
+        pal->b[entry] = (uint8_t)b;
 
         return;
     }
@@ -304,20 +316,36 @@ void GifSplitPalette(uint8_t* image, int numPixels, int firstElt, int lastElt, i
     int bRange = maxB - minB;
 
     // and split along that axis. (incidentally, this means this isn't a "proper" k-d tree but I don't know what else to call it)
-    int splitCom = 1;
-    if(bRange > gRange) splitCom = 2;
-    if(rRange > bRange && rRange > gRange) splitCom = 0;
+    int splitCom = 1; int rangeMin = minG; int rangeMax = maxG;
+    if(bRange > gRange) { splitCom = 2; rangeMin = minB; rangeMax = maxB; }
+    if(rRange > bRange && rRange > gRange) { splitCom = 0; rangeMin = minR; rangeMax = maxR; }
 
-    int subPixelsA = numPixels * (splitElt - firstElt) / (lastElt - firstElt);
-    int subPixelsB = numPixels-subPixelsA;
+    int subPixelsA = numPixels / 2;
 
     GifPartitionByMedian(image, 0, numPixels, splitCom, subPixelsA);
+    int splitValue = image[subPixelsA*4+splitCom];
 
+    // if the split is very unbalanced, split at the mean instead of the median to preserve rare colors
+    int splitUnbalance = GifIAbs( (splitValue - rangeMin) - (rangeMax - splitValue) );
+    if( splitUnbalance > (1536 >> treeLevel) )
+    {
+        splitValue = rangeMin + (rangeMax-rangeMin) / 2;
+        subPixelsA = GifPartitionByMean(image, 0, numPixels, splitCom, splitValue);
+    }
+
+    // add the bottom node for the transparency index
+    if( treeNode == numColors/2 )
+    {
+        subPixelsA = 0;
+        splitValue = 0;
+    }
+
+    int subPixelsB = numPixels-subPixelsA;
     pal->treeSplitElt[treeNode] = (uint8_t)splitCom;
-    pal->treeSplit[treeNode] = image[subPixelsA*4+splitCom];
+    pal->treeSplit[treeNode] = splitValue;
 
-    GifSplitPalette(image,              subPixelsA, firstElt, splitElt, splitElt-splitDist, splitDist/2, treeNode*2,   buildForDither, pal);
-    GifSplitPalette(image+subPixelsA*4, subPixelsB, splitElt, lastElt,  splitElt+splitDist, splitDist/2, treeNode*2+1, buildForDither, pal);
+    GifSplitPalette(image,              subPixelsA, treeNode*2,   treeLevel+1, buildForDither, pal);
+    GifSplitPalette(image+subPixelsA*4, subPixelsB, treeNode*2+1, treeLevel+1, buildForDither, pal);
 }
 
 // Finds all pixels that have changed from the previous image and
@@ -349,7 +377,7 @@ int GifPickChangedPixels( const uint8_t* lastFrame, uint8_t* frame, int numPixel
 }
 
 // Creates a palette by placing all the image pixels in a k-d tree and then averaging the blocks at the bottom.
-// This is known as the "modified median split" technique
+// This is known as the "median split" technique
 void GifMakePalette( const uint8_t* lastFrame, const uint8_t* nextFrame, uint32_t width, uint32_t height, int bitDepth, bool buildForDither, GifPalette* pPal )
 {
     pPal->bitDepth = bitDepth;
@@ -364,11 +392,7 @@ void GifMakePalette( const uint8_t* lastFrame, const uint8_t* nextFrame, uint32_
     if(lastFrame)
         numPixels = GifPickChangedPixels(lastFrame, destroyableImage, numPixels);
 
-    const int lastElt = 1 << bitDepth;
-    const int splitElt = lastElt/2;
-    const int splitDist = splitElt/2;
-
-    GifSplitPalette(destroyableImage, numPixels, 1, lastElt, splitElt, splitDist, 1, buildForDither, pPal);
+    GifSplitPalette(destroyableImage, numPixels, 1, 0, buildForDither, pPal);
 
     GIF_TEMP_FREE(destroyableImage);
 
