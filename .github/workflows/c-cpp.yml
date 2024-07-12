@@ -13,11 +13,9 @@ jobs:
       working-directory: ${{github.workspace}}
       run: clang -Weverything -O3 gif-h-demo.cpp -o gif -Wno-old-style-cast -Wno-missing-prototypes
     - name: test
-      working-directory: ${{github.workspace}}
       run: ./gif
     - name: Upload test
       uses: actions/upload-artifact@v4
-      working-directory: ${{github.workspace}}
       with:
         name: test-gif
         path: ./MyGif.gif
