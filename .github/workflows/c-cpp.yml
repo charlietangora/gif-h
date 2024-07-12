@@ -1,13 +1,14 @@
-name: Build Ubuntu
+name: Build Mac
 
 on: [push]
 
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
     steps:
     - uses: actions/checkout@v4
     - name: build
+      working-directory: ${{github.workspace}}
       run: clang -Weverything -O3 gif-h-demo.cpp -o gif -Wno-old-style-cast -Wno-missing-prototypes
