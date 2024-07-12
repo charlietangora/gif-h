@@ -1,10 +1,6 @@
-name: C/C++ CI
+name: Build Ubuntu
 
-on:
-  push:
-    branches: [ $default-branch ]
-  pull_request:
-    branches: [ $default-branch ]
+on: [push]
 
 jobs:
   build:
