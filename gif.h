@@ -694,7 +694,7 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uin
             uint8_t nextValue = image[(yy*width+xx)*4+3];
     #endif
 
-            // "loser mode" - no compression, every single code is followed immediately by a clear
+            // "worst possible mode" - no compression, every single code is followed immediately by a clear
             //WriteCode( f, stat, nextValue, codeSize );
             //WriteCode( f, stat, 256, codeSize );
 
@@ -810,7 +810,7 @@ bool GifBegin( GifWriter* writer, const char* filename, uint32_t width, uint32_t
         fputs("NETSCAPE2.0", writer->f); // yes, really
         fputc(3, writer->f); // 3 bytes of NETSCAPE2.0 data
 
-        fputc(1, writer->f); // JUST BECAUSE
+        fputc(1, writer->f); // this is the Netscape 2.0 sub-block ID and it must be 1, otherwise some viewers error
         fputc(0, writer->f); // loop infinitely (byte 0)
         fputc(0, writer->f); // loop infinitely (byte 1)
 
