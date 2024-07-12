@@ -342,7 +342,7 @@ void GifSplitPalette(uint8_t* image, int numPixels, int treeNode, int treeLevel,
 
     int subPixelsB = numPixels-subPixelsA;
     pal->treeSplitElt[treeNode] = (uint8_t)splitCom;
-    pal->treeSplit[treeNode] = splitValue;
+    pal->treeSplit[treeNode] = (uint8_t)splitValue;
 
     GifSplitPalette(image,              subPixelsA, treeNode*2,   treeLevel+1, buildForDither, pal);
     GifSplitPalette(image+subPixelsA*4, subPixelsB, treeNode*2+1, treeLevel+1, buildForDither, pal);

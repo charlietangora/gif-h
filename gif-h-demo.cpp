@@ -13,7 +13,7 @@
 
 const int width = 256;
 const int height = 256;
-uint8_t image[ width * height * 4 ];
+static uint8_t image[ width * height * 4 ];
 
 void SetPixel( int xx, int yy, uint8_t red, uint8_t grn, uint8_t blu )
 {
