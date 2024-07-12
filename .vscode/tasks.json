@@ -1,0 +1,37 @@
+{
+	// See https://go.microsoft.com/fwlink/?LinkId=733558
+	// for the documentation about the tasks.json format
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build (Debug)",
+			"type": "shell",
+			"command": "clang -Weverything -Wno-old-style-cast -Wno-missing-prototypes -g gif-h-demo.cpp -o gif",
+			"problemMatcher": ["$gcc"],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			"label": "Build (Release)",
+			"type": "shell",
+			"command": "clang -Weverything -Wno-old-style-cast -Wno-missing-prototypes -g -O3 gif-h-demo.cpp -o gif",
+			"problemMatcher": ["$gcc"],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			"label": "Clean",
+			"type": "shell",
+			"command": "rm -f ./gif",
+			"problemMatcher": [],
+			"group": {
+				"kind": "build"
+			}
+		},
+
+	]
+}
