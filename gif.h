@@ -554,11 +554,13 @@ void GifThresholdImage( const uint8_t* lastFrame, const uint8_t* nextFrame, uint
 // one bit at a time
 typedef struct
 {
+    uint32_t chunkIndex;
+    uint8_t chunk[256];   // bytes are written in here until we have 256 of them, then written to the file
+
     uint8_t bitIndex;  // how many bits in the partial byte written so far
     uint8_t byte;      // current partial byte
 
-    uint32_t chunkIndex;
-    uint8_t chunk[256];   // bytes are written in here until we have 256 of them, then written to the file
+    uint8_t padding[2];    // make padding explicit
 } GifBitStatus;
 
 // insert a single bit
@@ -754,6 +756,8 @@ typedef struct
     FILE* f;
     uint8_t* oldImage;
     bool firstFrame;
+
+    uint8_t padding[7];    // make padding explicit
 } GifWriter;
 
 // Creates a gif file.
