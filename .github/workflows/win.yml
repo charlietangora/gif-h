@@ -11,7 +11,12 @@ jobs:
     - uses: actions/checkout@v4
     - name: build
       working-directory: ${{github.workspace}}
-      run: cl /W4 /EHsc gif-h-demo.cpp
+      run: |
+        ${VS_INST_PATH} = & "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -property installationPath
+        Write-Output "  <-> VS Install Path: ${VS_INST_PATH}"
+        Import-Module ${VS_INST_PATH}/Common7/Tools/Microsoft.VisualStudio.DevShell.dll
+        Enter-VsDevShell -VsInstallPath ${VS_INST_PATH} -SkipAutomaticLocation -DevCmdArguments '-arch=${{matrix.config.arch}} -no_logo'
+        cl /W4 /EHsc gif-h-demo.cpp
     - name: test
       run: ./gif-h-demo.exe
     - name: Upload test
